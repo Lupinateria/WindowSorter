@@ -1,0 +1,3312 @@
+---BEGIN-FILE---:src/App.xaml
+<Application x:Class="WindowSorter.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:WindowSorter">
+    <Application.Resources>
+
+    </Application.Resources>
+</Application>
+
+---END-FILE---:src/App.xaml
+---BEGIN-FILE---:src/App.xaml.cs
+using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Windows;
+using System.Windows.Interop;
+using WindowSorter.Core;
+using WindowSorter.Model;
+using WindowSorter.Model.HotKey;
+using WindowSorter.View;
+using WindowSorter.View.Settings;
+using Application = System.Windows.Application;
+using Forms = System.Windows.Forms;
+
+namespace WindowSorter {
+    /// <summary>
+    /// Interaction logic for App.xaml
+    /// </summary>
+    public partial class App : Application {
+        // メインウィンドウ
+        public MainWindow mainWindow;
+
+        // タスクトレイ用
+        private NotifyIcon notifyIcon;
+
+        ~App() {
+            this.notifyIcon.Dispose();
+            HotKeyService.UnRegister();
+        }
+
+        protected override void OnStartup(StartupEventArgs e) {
+            base.OnStartup(e);
+
+            // --------------------------------------------------------------------------
+            // NotifyIcon 作成
+            // --------------------------------------------------------------------------
+            InitializeNotifyIcon();
+
+            // --------------------------------------------------------------------------
+            // メインウィンドウ 作成
+            // --------------------------------------------------------------------------
+            this.mainWindow = new MainWindow();
+
+            var handle = new WindowInteropHelper(mainWindow).EnsureHandle();
+
+            // --------------------------------------------------------------------------
+            // 設定ファイル 読み込み
+            // --------------------------------------------------------------------------
+            SettingsService.Load();
+
+            // --------------------------------------------------------------------------
+            // ホットキー登録
+            // --------------------------------------------------------------------------
+            HotKeyService.Initialize(
+                handle,
+                (sender, e2) => {
+                    // ウィンドウ 表示
+                    this.mainWindow.ToggleWindowVisible();
+                }
+            );
+
+            HotKeyService.Register(SettingsService.Current.HotKeyModifier, SettingsService.Current.HotKey);
+        }
+
+        // NotifyIcon初期化
+        private void InitializeNotifyIcon() {
+            // ----------------------------------------------------
+            // 初期化
+            // ----------------------------------------------------
+            this.notifyIcon = new NotifyIcon();
+            notifyIcon.Visible = true;
+            notifyIcon.Icon = new System.Drawing.Icon(Application.GetResourceStream(new Uri("pack://application:,,,/icon/icon.ico")).Stream);
+            this.notifyIcon.Text = "Window Sorter";
+
+            // アイコンクリックで表示
+            this.notifyIcon.Click += (sender, e) => {
+                if (e is Forms.MouseEventArgs mouseEvent && mouseEvent.Button == Forms.MouseButtons.Left) {
+                    // NOTE:
+                    // 画面外クリックで非表示 -> マウスアップでイベント発火 -> 表示の順番になるので、
+                    // 再表示されることがある。
+                    // 直すのが面倒なので放置。
+                    this.mainWindow.ShowWindow(true);
+                }
+
+            };
+
+            // ----------------------------------------------------
+            // NotifyIcon コンテキストメニュー
+            // ----------------------------------------------------
+            Forms.ContextMenuStrip menu = new Forms.ContextMenuStrip();
+
+            // 設定
+            Forms.ToolStripMenuItem openSettingsMenuItem = new Forms.ToolStripMenuItem();
+            openSettingsMenuItem.Text = "&設定";
+            openSettingsMenuItem.Click += (s, e) => {
+                if (WindowService.Instance.ShowDialog<SettingsMainWindow>(mainWindow) == true) {
+                    // 設定保存後にホットキーを再登録
+                    HotKeyService.Register(SettingsService.Current.HotKeyModifier, SettingsService.Current.HotKey);
+                }
+            };
+            menu.Items.Add(openSettingsMenuItem);
+
+            // About
+            Forms.ToolStripMenuItem aboutMenuItem = new Forms.ToolStripMenuItem();
+            aboutMenuItem.Text = Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyTitleAttribute>()?.Title + "について(&A)";
+            aboutMenuItem.Click += (s, e) => {
+                WindowService.Instance.ShowDialog<AboutWindow>(mainWindow);
+            };
+            menu.Items.Add(aboutMenuItem);
+
+            // 終了
+            Forms.ToolStripMenuItem exitMenuItem = new Forms.ToolStripMenuItem();
+            exitMenuItem.Text = "&終了";
+            exitMenuItem.Click += (s, e) => {
+                this.notifyIcon.Dispose();
+                Application.Current.Shutdown();
+            };
+            menu.Items.Add(exitMenuItem);
+            this.notifyIcon.ContextMenuStrip = menu;
+        }
+    }
+}
+
+---END-FILE---:src/App.xaml.cs
+---BEGIN-FILE---:src/AssemblyInfo.cs
+using System.Windows;
+
+[assembly: ThemeInfo(
+    ResourceDictionaryLocation.None,            //where theme specific resource dictionaries are located
+                                                //(used if a resource is not found in the page,
+                                                // or application resource dictionaries)
+    ResourceDictionaryLocation.SourceAssembly   //where the generic resource dictionary is located
+                                                //(used if a resource is not found in the page,
+                                                // app, or any theme specific resource dictionaries)
+)]
+
+---END-FILE---:src/AssemblyInfo.cs
+---BEGIN-FILE---:src/Core/DelegateCommand.cs
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using System.Windows.Input;
+
+namespace WindowSorter.Core {
+    public class DelegateCommand : ICommand {
+        private Action<object> _execute;
+
+        private Func<object, bool> _canExecute;
+
+        #region コンストラクタ
+        public DelegateCommand(Action<object> execute) : this(execute, null) {
+        }
+
+        public DelegateCommand(Action<object> execute, Func<object, bool> canExecute) {
+            this._execute = execute;
+            this._canExecute = canExecute;
+        }
+        #endregion
+
+        #region ICommandインターフェースの実装
+        public event EventHandler CanExecuteChanged;
+
+        public void RaiseCanExecuteChanged() {
+            var h = this.CanExecuteChanged;
+            if (h != null) {
+                h(this, EventArgs.Empty);
+            }
+        }
+
+        public bool CanExecute(object parameter) {
+            return (this._canExecute != null) ? this._canExecute(parameter) : true;
+        }
+
+        public void Execute(object parameter) {
+            if (this._execute != null) {
+                this._execute(parameter);
+            }
+        }
+        #endregion
+    }
+}
+
+---END-FILE---:src/Core/DelegateCommand.cs
+---BEGIN-FILE---:src/Core/IWindowService.cs
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using System.Windows;
+
+namespace WindowSorter.Core {
+    public interface IWindowService {
+        public void ShowWindow<T>(object? vm = null) where T : Window, new();
+        public bool? ShowDialog<T>(Window owner, object? vm = null) where T : Window, new();
+    }
+}
+
+---END-FILE---:src/Core/IWindowService.cs
+---BEGIN-FILE---:src/Core/NativeMethods.cs
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+
+namespace WindowSorter.Core {
+    public class NativeMethods {
+        public const int SW_RESTORE = 9;
+        public const int WM_HOTKEY = 0x0312;
+
+        public const uint DWM_TNP_RECTDESTINATION = 0x00000001;
+        public const uint DWM_TNP_RECTSOURCE = 0x00000002;
+        public const uint DWM_TNP_OPACITY = 0x00000004;
+        public const uint DWM_TNP_VISIBLE = 0x00000008;
+
+        public delegate bool EnumWindowsDelegate(IntPtr hWnd, IntPtr lParam);
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct SIZE {
+            public int cx;
+            public int cy;
+        }
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool EnumWindows(EnumWindowsDelegate lpEnumFunc, IntPtr lParam);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        public static extern int GetWindowText(IntPtr hWnd, [Out] StringBuilder lpString, int nMaxCount);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        public static extern int GetWindowTextLength(IntPtr hWnd);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        public static extern int GetClassName(IntPtr hWnd, [Out] StringBuilder lpClassName, int nMaxCount);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool IsWindowVisible(IntPtr hWnd);
+
+        public enum DWMWINDOWATTRIBUTE : uint {
+            Cloaked = 14
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct RECT {
+            public int Left, Top, Right, Bottom;
+            public RECT(int left, int top, int right, int bottom) {
+                Left = left;
+                Top = top;
+                Right = right;
+                Bottom = bottom;
+            }
+        }
+
+        [DllImport("dwmapi.dll")]
+        public static extern int DwmGetWindowAttribute(IntPtr hwnd, DWMWINDOWATTRIBUTE dwAttribute, out bool pvAttribute, int cbAttribute);
+
+        [DllImport("dwmapi.dll")]
+        public static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
+
+        public const int DWMWA_USE_IMMERSIVE_DARK_MODE_BEFORE_20H1 = 19;
+        public const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
+        public const int DWMWA_TRANSITIONS_FORCEDISABLED = 3;
+        public const int DWMWA_CLOAK = 13;
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool IsIconic(IntPtr hWnd);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool BringWindowToTop(IntPtr hWnd);
+
+        [Flags]
+        public enum ProcessAccessFlags : uint {
+            QueryLimitedInformation = 0x00001000  // PROCESS_QUERY_LIMITED_INFORMATION (0x1000)
+        }
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern IntPtr OpenProcess(ProcessAccessFlags processAccess, bool bInheritHandle, int processId);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool QueryFullProcessImageName(IntPtr hProcess, int dwFlags, [Out] StringBuilder lpExeName, ref int lpdwSize);
+
+        [DllImport("kernel32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool CloseHandle(IntPtr handle);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool PostMessage(HandleRef hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool SetForegroundWindow(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        public static extern int RegisterHotKey(IntPtr HWnd, int ID, int MOD_KEY, int KEY);
+
+        [DllImport("user32.dll")]
+        public static extern int UnregisterHotKey(IntPtr HWnd, int ID);
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct DWM_THUMBNAIL_PROPERTIES {
+            public uint dwFlags;
+            public RECT rcDestination;
+            public RECT rcSource;
+            public byte opacity;
+            public int fVisible;
+            public int fSourceClientAreaOnly;
+        }
+
+        [DllImport("dwmapi.dll")]
+        public static extern int DwmRegisterThumbnail(IntPtr dest, IntPtr src, out IntPtr thumb);
+
+        [DllImport("dwmapi.dll")]
+        public static extern int DwmUnregisterThumbnail(IntPtr thumb);
+
+        [DllImport("dwmapi.dll")]
+        public static extern int DwmQueryThumbnailSourceSize(IntPtr thumb, out SIZE size);
+
+        [DllImport("dwmapi.dll")]
+        public static extern int DwmUpdateThumbnailProperties(IntPtr thumb, ref DWM_THUMBNAIL_PROPERTIES props);
+
+        [DllImport("dwmapi.dll")]
+        public static extern int DwmFlush(); // DWM�̕`��(�R���|�W�V����)������҂�API
+    }
+}
+
+---END-FILE---:src/Core/NativeMethods.cs
+---BEGIN-FILE---:src/Core/NotificationObject.cs
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Linq;
+using System.Runtime.CompilerServices;
+using System.Text;
+using System.Threading.Tasks;
+
+namespace WindowSorter.Core {
+    public class NotificationObject : INotifyPropertyChanged {
+        public event PropertyChangedEventHandler PropertyChanged;
+
+        protected void RaisePropertyChanged([CallerMemberName] string propertyName = null) {
+            var h = this.PropertyChanged;
+            if (h != null) {
+                h(this, new PropertyChangedEventArgs(propertyName));
+            }
+        }
+
+        protected bool SetProperty<T>(ref T target, T value, [CallerMemberName] string propertyName = null) {
+            if (Equals(target, value))
+                return false;
+
+            target = value;
+            RaisePropertyChanged(propertyName);
+            return true;
+        }
+    }
+}
+
+---END-FILE---:src/Core/NotificationObject.cs
+---BEGIN-FILE---:src/Core/WindowService.cs
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using System.Windows;
+
+namespace WindowSorter.Core {
+    /// <summary>
+    /// Windowのオープン・クローズをまとめたサービスクラス
+    /// </summary>
+    public class WindowService : IWindowService {
+        enum OpenMode {
+            Normal,
+            Dialog,
+        };
+
+        public static WindowService Instance { get; private set; } = new WindowService();
+
+        private readonly Dictionary<Type, Tuple<Window, OpenMode>> _openWindowDict = new Dictionary<Type, Tuple<Window, OpenMode>>();
+
+        private WindowService() { }
+
+        /// <summary>
+        /// Tで渡したWindowを開く。重複して開かない。
+        /// </summary>
+        /// <typeparam name="T">開きたいWindowの型</typeparam>
+        /// <param name="vm">Windowに紐づけるViewModel(DataContext)<br>外部からViewModelを注入する必要がないなら、null。つまり、View自身がコードビハインドでViewModelを生成する場合。</param>
+        public void ShowWindow<T>(object? vm = null) where T : Window, new() {
+            Type windowType;
+
+            // すでに開いているウィンドウがあれば表示
+            if (ActivateExistingWindow<T>(out windowType)) {
+                return;
+            }
+
+            // ウィンドウを新しく表示
+            T newWindow = CreateNewWindow<T>(vm, windowType, OpenMode.Normal);
+
+            newWindow.Show();
+        }
+
+        /// <summary>
+        /// Windowをダイアログで開く
+        /// </summary>
+        /// <typeparam name="T"></typeparam>
+        /// <param name="owner"></param>
+        /// <param name="vm"></param>
+        /// <returns></returns>
+        public bool? ShowDialog<T>(Window owner, object? vm = null) where T : Window, new() {
+            Type windowType;
+
+            // すでに開いているウィンドウがあれば表示
+            if (ActivateExistingWindow<T>(out windowType)) {
+                return true;
+            }
+
+            // ウィンドウを新しく表示
+            T newWindow = CreateNewWindow<T>(vm, windowType, OpenMode.Dialog);
+
+            // オーナー設定
+            newWindow.Owner = owner;
+
+            return newWindow.ShowDialog();
+        }
+
+        /// <summary>
+        /// 指定されたウィンドウを閉じる
+        /// </summary>
+        /// <param name="window"></param>
+        public void Close(Window window, bool? dialogResult) {
+
+            var tuple = _openWindowDict.Values.FirstOrDefault(x => x.Item1 == window);
+            
+            if (tuple == null) {
+                return;
+            }
+
+            CloseWindow(tuple.Item1, tuple.Item2, dialogResult);
+        }
+
+        /// <summary>
+        /// ViewModelを渡して紐づくウィンドウを閉じる
+        /// </summary>
+        /// <typeparam name="T"></typeparam>
+        /// <param name="windowType"></param>
+        /// <returns></returns>
+        public void Close (object vm, bool? dialogResult) {
+            var tuple = _openWindowDict.Values.FirstOrDefault(x => x.Item1.DataContext == vm);
+
+            if (tuple == null) {
+                return;
+            }
+
+            CloseWindow(tuple.Item1, tuple.Item2, dialogResult);
+        }
+
+        private void CloseWindow (Window window, OpenMode openMode , bool? dialogResult) {
+            switch (openMode) {
+                case OpenMode.Normal:
+                    window.Close();
+                    break;
+
+                case OpenMode.Dialog:
+                    window.DialogResult = dialogResult;
+                    break;
+            }
+        }
+
+
+        private bool ActivateExistingWindow<T>(out Type windowType) where T : Window, new() {
+            windowType = typeof(T);
+
+            // 既に開いているウィンドウがあれば、単に再表示してreturn
+            if (_openWindowDict.TryGetValue(windowType, out var existWindowInfo)) {
+                if (existWindowInfo.Item1.WindowState == WindowState.Minimized) {
+                    existWindowInfo.Item1.WindowState = WindowState.Normal;
+                }
+                existWindowInfo.Item1.Activate();
+                return true;
+            }
+
+            return false;
+        }
+
+        private T CreateNewWindow<T>(object? vm, Type windowType, OpenMode mode) where T : Window, new() {
+            T newWindow = new T();
+
+            if (vm != null) {
+                newWindow.DataContext = vm;
+            }
+
+            _openWindowDict.Add(windowType, new Tuple<Window, OpenMode>(newWindow, mode));
+            newWindow.Closed += (s, e) => _openWindowDict.Remove(windowType);
+            return newWindow;
+        }
+    }
+}
+
+---END-FILE---:src/Core/WindowService.cs
+---BEGIN-FILE---:src/Model/Grouping/Condition.cs
+namespace WindowSorter.Model.Grouping {
+    // 比較対象
+    public enum Target {
+        WindowTitle,
+        ProcessName,
+    }
+
+    // 比較方法
+    public enum Operator {
+        Contains,
+        StartWith,
+        EndWith,
+    }
+
+    /// <summary>
+    /// 条件式
+    /// </summary>
+    public class Condition {
+        /// <summary>
+        /// 比較対象
+        /// </summary>
+        public Target Target { get; set; }  = Target.WindowTitle;
+        
+        /// <summary>
+        /// 比較方法
+        /// </summary>
+        public Operator Operator { get; set; } = Operator.Contains;
+        
+        /// <summary>
+        /// 語句
+        /// </summary>
+        public string Value { get; set; } = "";
+        
+        /// <summary>
+        /// この条件式を評価する
+        /// </summary>
+        /// <returns></returns>
+        public bool Match(WindowInformation window) {
+            string targetValue = Target switch {
+                Target.WindowTitle => window.WindowTitle ?? string.Empty,
+                Target.ProcessName => window.ProcessName ?? string.Empty,
+                _ => string.Empty
+            };
+
+            if (string.IsNullOrEmpty(Value)) return true;
+
+            return Operator switch {
+                Operator.Contains => targetValue.Contains(Value, StringComparison.OrdinalIgnoreCase),
+                Operator.StartWith => targetValue.StartsWith(Value, StringComparison.OrdinalIgnoreCase),
+                Operator.EndWith => targetValue.EndsWith(Value, StringComparison.OrdinalIgnoreCase),
+                _ => false
+            };
+        }
+    }
+}
+
+---END-FILE---:src/Model/Grouping/Condition.cs
+---BEGIN-FILE---:src/Model/Grouping/GroupingRule.cs
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+
+namespace WindowSorter.Model.Grouping {
+
+    /// <summary>
+    /// すべてに一致 or いずれかに一致
+    /// </summary>
+    public enum EvalType {
+        AND,
+        OR,
+    }
+
+    /// <summary>
+    /// 分類ルール
+    /// </summary>
+    public class GroupingRule : RuleBase {
+        /// <summary>
+        /// 分類先となるグループのID
+        /// </summary>
+        public string MoveTargetGroupID { get; set; } = string.Empty;
+    }
+}
+
+---END-FILE---:src/Model/Grouping/GroupingRule.cs
+---BEGIN-FILE---:src/Model/Grouping/RuleBase.cs
+using System;
+using System.Collections.Generic;
+using System.Linq;
+
+namespace WindowSorter.Model.Grouping {
+    /// <summary>
+    /// 条件評価を行うルールの基底クラス
+    /// </summary>
+    public abstract class RuleBase {
+        /// <summary>
+        /// ルール名称
+        /// </summary>
+        public string Name { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 評価方法 (AND / OR)
+        /// </summary>
+        public EvalType EvalType { get; set; } = EvalType.AND;
+
+        /// <summary>
+        /// 条件式のリスト
+        /// </summary>
+        public List<Condition> Conditions { get; set; } = new List<Condition>();
+
+        /// <summary>
+        /// このルールを評価し、ウィンドウが条件に一致するかを評価
+        /// </summary>
+        /// <param name="window">評価対象のウィンドウ</param>
+        /// <returns></returns>
+        public bool Match(WindowInformation window) {
+            if (Conditions == null || Conditions.Count == 0) {
+                return false;
+            }
+
+            if (EvalType == EvalType.AND) {
+                return Conditions.All(c => c.Match(window));
+            } else {
+                return Conditions.Any(c => c.Match(window));
+            }
+        }
+    }
+}
+
+---END-FILE---:src/Model/Grouping/RuleBase.cs
+---BEGIN-FILE---:src/Model/Grouping/SortRule.cs
+namespace WindowSorter.Model.Grouping {
+    /// <summary>
+    /// 並び替えルール
+    /// </summary>
+    public class SortRule : RuleBase {
+        // 並び替え特有の追加プロパティが将来あればここに追加
+    }
+}
+
+---END-FILE---:src/Model/Grouping/SortRule.cs
+---BEGIN-FILE---:src/Model/Grouping/WindowEnumerator.cs
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Threading.Tasks;
+using WindowSorter.Core;
+
+namespace WindowSorter.Model.Grouping {
+    public static class WindowEnumerator {
+        // Process ID -> Process名のキャッシュ
+        private static Dictionary<uint, string> _processNameCache = new Dictionary<uint, string>();
+
+        /// <summary>
+        /// ウィンドウを列挙して返す
+        /// </summary>
+        /// <returns></returns>
+        public static List<WindowInformation> GetWindows() {
+            // 戻り値
+            List<WindowInformation> windowList = new();
+
+            // 今回走査時のProcessID
+            HashSet<uint> pids = new();
+
+            NativeMethods.EnumWindows(
+                new NativeMethods.EnumWindowsDelegate((hWnd, lParam) => {
+                    if (!NativeMethods.IsWindowVisible(hWnd))
+                        return true;
+
+                    int textLen = NativeMethods.GetWindowTextLength(hWnd);
+                    if (0 >= textLen)
+                        return true;
+
+                    StringBuilder className = new StringBuilder(256);
+                    NativeMethods.GetClassName(hWnd, className, className.Capacity);
+
+                    // Progman (プログラムマネージャー/デスクトップ壁紙部分) は除外
+                    if (className.ToString().Equals("Progman"))
+                        return true;
+
+                    // DWM (Desktop Window Manager) によって隠されている (Cloaked) かどうかを確認
+                    // ストアアプリなどがバックグラウンドで非表示状態になっている場合を除外するために必要
+                    NativeMethods.DwmGetWindowAttribute(hWnd, NativeMethods.DWMWINDOWATTRIBUTE.Cloaked, out bool isCloaked, Marshal.SizeOf(typeof(bool)));
+                    if (isCloaked)
+                        return true;
+
+                    StringBuilder windowTitle = new StringBuilder(textLen + 1);
+                    NativeMethods.GetWindowText(hWnd, windowTitle, windowTitle.Capacity);
+
+                    // ウィンドウハンドル -> プロセスID取得
+                    uint processID;
+                    NativeMethods.GetWindowThreadProcessId(hWnd, out processID);
+
+                    // 自分自身（このアプリのウィンドウ）は検索結果から除外
+                    if (System.Diagnostics.Process.GetCurrentProcess().Id == processID) {
+                        return true;
+                    }
+
+                    pids.Add(processID);
+
+                    string processName;
+                    if (_processNameCache.ContainsKey(processID)) {
+                        // キャッシュヒット
+                        processName = _processNameCache[processID];
+
+                    } else {
+                        // ミスヒット
+                        StringBuilder processFileName = new StringBuilder(1024);
+
+                        // プロセス名取得
+                        nint hProcess = NativeMethods.OpenProcess(
+                            NativeMethods.ProcessAccessFlags.QueryLimitedInformation,
+                            false,
+                            (int)processID);
+
+                        int size = processFileName.Capacity;
+                        NativeMethods.QueryFullProcessImageName(hProcess, 0, processFileName, ref size);
+                        NativeMethods.CloseHandle(hProcess);
+
+                        processName = Path.GetFileName(processFileName.ToString()) ?? "";
+
+                        // キャッシュに積む
+                        _processNameCache.Add(processID, processName);
+                    }
+
+                    windowList.Add(new WindowInformation() {
+                        WindowTitle = windowTitle.ToString(),
+                        WindowClassName = className.ToString(),
+                        Handle = hWnd,
+                        ProcessName = processName
+                    });
+
+                    return true;
+                }),
+                nint.Zero);
+
+            // 今回走査時のProcessIDでキャッシュを作り直す
+            _processNameCache = _processNameCache
+                .Where(x => pids.Contains(x.Key))
+                .ToDictionary(x => x.Key, x => x.Value);
+
+            return windowList;
+        }
+    }
+}
+
+---END-FILE---:src/Model/Grouping/WindowEnumerator.cs
+---BEGIN-FILE---:src/Model/Grouping/WindowGroup.cs
+using System;
+using System.Collections.Generic;
+using System.Text.Json.Serialization;
+
+namespace WindowSorter.Model.Grouping {
+    public class WindowGroup {
+        /// <summary>
+        /// グループを一意に識別するID (UUID)
+        /// </summary>
+        public string ID { get; set; } = Guid.NewGuid().ToString();
+
+        /// <summary>
+        /// グループ 名称 
+        /// </summary>
+        public string Name { get; set; } = string.Empty;
+
+        /// <summary>
+        /// このグループ内でのウィンドウ並び替えルール
+        /// </summary>
+        public List<SortRule> SortRules { get; set; } = new List<SortRule>();
+        
+        /// <summary>
+        /// このグループに分けられるウィンドウのリスト (JSONには含めない)
+        /// </summary>
+        [JsonIgnore]
+        public List<WindowInformation> Windows { get; set; } = new List<WindowInformation>();
+    }
+}
+
+---END-FILE---:src/Model/Grouping/WindowGroup.cs
+---BEGIN-FILE---:src/Model/Grouping/WindowGroupingEngine.cs
+using System;
+using System.Collections.Generic;
+using System.Data;
+using System.Diagnostics;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+
+namespace WindowSorter.Model.Grouping {
+    /// <summary>
+    /// ウィンドウグルーピングの本体
+    /// </summary>
+    public static class WindowGroupingEngine {
+        /// <summary>
+        /// 表示中のウィンドウを分類して返す
+        /// </summary>
+        public static List<WindowGroup> GetWindowGroupList(IEnumerable<GroupingRule> rules, IEnumerable<WindowGroup> groups) {
+            // ウィンドウを列挙
+            List<WindowInformation> windows = WindowEnumerator.GetWindows();
+
+            // 定義済みのグループからグループ生成
+            Dictionary<string, WindowGroup> groupMap = groups.ToDictionary(
+                g => g.ID,
+                g => new WindowGroup { ID = g.ID, Name = g.Name }
+            );
+
+            WindowGroup otherGroup = new WindowGroup { ID = "OTHER", Name = "未分類" };
+
+            // 各ウィンドウに対して、ルールを順番に適用する
+            foreach (WindowInformation w in windows) {
+                string matchedGroupId = string.Empty;
+                string matchedRuleName = "なし";
+
+                // ルールを順番に評価 (定義した順番)
+                foreach (GroupingRule rule in rules) {
+                    if (rule.Match(w)) {
+                        // 最初にマッチしたルールで抜ける
+                        matchedGroupId = rule.MoveTargetGroupID;
+                        matchedRuleName = rule.Name;
+                        break;
+                    }
+                }
+
+                // 振り分け
+                if (!string.IsNullOrEmpty(matchedGroupId) && groupMap.TryGetValue(matchedGroupId, out WindowGroup group)) {
+                    group.Windows.Add(w);
+                } else {
+                    // ヒットしない場合は未分類へ
+                    otherGroup.Windows.Add(w);
+                }
+            }
+
+            // グループを返す
+            // ウィンドウが空でも返す
+            List<WindowGroup> result = new List<WindowGroup>();
+            foreach (WindowGroup originalGroup in groups) {
+                WindowGroup group = groupMap[originalGroup.ID];
+
+                // ウィンドウの並び替え
+                group.Windows = group.Windows
+                    .OrderBy(w => {
+                        // 最初にマッチする SortRule のインデックスを取得（先に定義したルールにヒットがより強い）
+                        int ruleIndex = originalGroup.SortRules.FindIndex(r => r.Match(w));
+                        // マッチしない場合は最大値（最後の方へ）
+                        return ruleIndex == -1 ? int.MaxValue : ruleIndex;
+                    })
+                    .ThenBy(w => w.WindowTitle) // デフォルトの並び替え
+                    .ToList();
+
+                result.Add(group);
+            }
+
+            if (otherGroup.Windows.Any()) {
+                // 未分類はタイトル昇順のみ（あとで変更できるようにするかも）
+                otherGroup.Windows = otherGroup.Windows.OrderBy(w => w.WindowTitle).ToList();
+                result.Add(otherGroup);
+            }
+
+            return result;
+        }
+    }
+}
+
+---END-FILE---:src/Model/Grouping/WindowGroupingEngine.cs
+---BEGIN-FILE---:src/Model/Grouping/WindowInformation.cs
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Linq;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Threading.Tasks;
+using System.Windows.Media;
+using WindowSorter.Core;
+
+namespace WindowSorter.Model.Grouping {
+    public class WindowInformation {
+        // メイン情報
+        public string WindowTitle { get; set; } = "";
+        public string WindowClassName { get; set; } = "";
+        public nint Handle { get; set; } = nint.Zero;
+        public string ProcessName { get; set; } = "";
+
+        public bool BringWindowToTop() {
+            if (NativeMethods.IsIconic(Handle)) {
+                NativeMethods.ShowWindowAsync(Handle, NativeMethods.SW_RESTORE);
+            }
+            NativeMethods.BringWindowToTop(Handle);
+            return true;
+        }
+
+        public bool PostSCCLOSE() {
+            return NativeMethods.PostMessage(
+                new HandleRef(this, Handle),
+                0x0112,
+                0xF060,
+                nint.Zero);
+        }
+    }
+}
+
+---END-FILE---:src/Model/Grouping/WindowInformation.cs
+---BEGIN-FILE---:src/Model/HotKey/HotKeyService.cs
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using System.Windows.Input;
+using System.Windows.Interop;
+using WindowSorter.Core;
+
+namespace WindowSorter.Model.HotKey {
+    public static class HotKeyService {
+        private static IntPtr _handle;
+        private static HwndSource _hwndSource;
+        private static bool _isInitialized = false;
+
+        private static event EventHandler HotKeyPressed;
+
+        // 初期化
+        public static void Initialize(IntPtr handle, EventHandler eventHandler) {
+            if (_isInitialized) return;
+
+            _handle = handle;
+            HotKeyPressed = eventHandler;
+
+            // メッセージループ Hook
+            _hwndSource = HwndSource.FromHwnd(handle);
+            _hwndSource.AddHook(HwndHook);
+
+            _isInitialized = true;
+        }
+
+        // ホットキー 登録
+        public static void Register(ModifierKeys modifierKeys, Key key) {
+            UnRegister();
+
+            // キーが未設定の場合は何もしない
+            if (key == Key.None) return;
+
+            int mod = (int)modifierKeys;
+            int vk = KeyInterop.VirtualKeyFromKey(key);
+
+            NativeMethods.RegisterHotKey(
+                _handle,
+                (int)NativeMethods.WM_HOTKEY,
+                mod,
+                vk
+            );
+        }
+
+        // ホットキー 解除
+        public static void UnRegister() {
+            if (_handle != IntPtr.Zero) {
+                NativeMethods.UnregisterHotKey(_handle, NativeMethods.WM_HOTKEY);
+            }
+        }
+
+        // メッセージループ 本体
+        private static IntPtr HwndHook(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled) {
+            if (msg == NativeMethods.WM_HOTKEY) {
+                HotKeyPressed?.Invoke(null, EventArgs.Empty);
+                handled = true;
+            }
+            return IntPtr.Zero;
+        }
+    }
+}
+
+---END-FILE---:src/Model/HotKey/HotKeyService.cs
+---BEGIN-FILE---:src/Model/Settings/SettingsData.cs
+using System.Collections.Generic;
+using System.Windows.Input;
+using WindowSorter.Model.Grouping;
+
+namespace WindowSorter.Model {
+    /// <summary>
+    /// 設定
+    /// </summary>
+    public class SettingsData {
+        public List<WindowGroup> GroupList { get; set; } = new List<WindowGroup>();
+        public List<GroupingRule> GroupingRuleList { get; set; } = new List<GroupingRule>();
+        public ModifierKeys HotKeyModifier { get; set; } = ModifierKeys.Alt;
+        public Key HotKey { get; set; } = Key.Q;
+        public uint ShowWindowDelay { get; set; } = 10;
+        public bool ClearSearchOnWindowSelect { get; set; } = true;
+        public double ThumbnailWidth { get; set; } = 284;
+        public double ThumbnailHeight { get; set; } = 160;
+        /// <summary>
+        /// 現在の設定のクローンインスタンス取得
+        /// </summary>
+        public SettingsData GetClone() {
+            var json = System.Text.Json.JsonSerializer.Serialize(this);
+            return System.Text.Json.JsonSerializer.Deserialize<SettingsData>(json)!;
+        }
+    }
+}
+
+---END-FILE---:src/Model/Settings/SettingsData.cs
+---BEGIN-FILE---:src/Model/Settings/SettingsService.cs
+using System;
+using System.IO;
+using System.Runtime.CompilerServices;
+using System.Text.Encodings.Web;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
+namespace WindowSorter.Model {
+    /// <summary>
+    /// 設定ファイルの読み書きを管理
+    /// </summary>
+    public static class SettingsService {
+        public static SettingsData Current { get; set; } = new SettingsData();
+
+        private const string FileName = "settings.json";
+
+        private static readonly JsonSerializerOptions Options = new JsonSerializerOptions {
+            WriteIndented = true, // 読みやすくインデント
+            Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping, // 日本語をエスケープしない
+            Converters = { new JsonStringEnumConverter() } // Enum を文字列名で扱う
+        };
+
+        /// <summary>
+        /// 設定ファイルのフルパスを取得
+        /// </summary>
+        private static string GetFilePath() {
+            return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, FileName);
+        }
+
+        /// <summary>
+        /// 設定を保存
+        /// </summary>
+        public static void Save(SettingsData data) {
+            Current = data;
+            Save();
+        }
+
+        /// <summary>
+        /// 設定を保存
+        /// </summary>
+        public static void Save() {
+            string filePath = GetFilePath();
+            string json = JsonSerializer.Serialize(Current, Options);
+            File.WriteAllText(filePath, json);
+        }
+
+        /// <summary>
+        /// 設定を読み込む
+        /// </summary>
+        public static void Load() {
+            string filePath = GetFilePath();
+
+            if (!File.Exists(filePath)) {
+                Current = new SettingsData();
+            }
+
+            try {
+                string json = File.ReadAllText(filePath);
+                SettingsData settings = JsonSerializer.Deserialize<SettingsData>(json, Options);
+                Current = settings ?? new SettingsData();
+            } catch (Exception) {
+                // TODO : 雑なので後で直す
+                Current = new SettingsData();
+            }
+        }
+    }
+}
+
+---END-FILE---:src/Model/Settings/SettingsService.cs
+---BEGIN-FILE---:src/View/AboutWindow.xaml
+<Window x:Class="WindowSorter.View.AboutWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Height="300" Width="350"
+        WindowStartupLocation="CenterOwner" ResizeMode="NoResize" WindowStyle="ToolWindow">
+    <Grid Margin="20">
+        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+            <Image Source="/icon/icon.ico" Width="64" Height="64" Margin="0,0,0,10" HorizontalAlignment="Center"/>
+            <TextBlock x:Name="AppNameText" FontSize="22" FontWeight="Bold" HorizontalAlignment="Center" Margin="0,0,0,5"/>
+            <TextBlock x:Name="VersionText" FontSize="14" HorizontalAlignment="Center" Margin="0,0,0,25" Foreground="#666"/>
+            <Button Content="閉じる" Width="100" Height="30" Click="CloseButton_Click" HorizontalAlignment="Center" IsDefault="True"/>
+        </StackPanel>
+    </Grid>
+</Window>
+
+---END-FILE---:src/View/AboutWindow.xaml
+---BEGIN-FILE---:src/View/AboutWindow.xaml.cs
+using System;
+using System.Reflection;
+using System.Windows;
+
+namespace WindowSorter.View {
+    /// <summary>
+    /// AboutWindow.xaml の相互作用ロジック
+    /// </summary>
+    public partial class AboutWindow : Window {
+        public AboutWindow() {
+            InitializeComponent();
+
+            var assembly = Assembly.GetExecutingAssembly();
+            // AssemblyTitleAttribute からタイトルを取得
+            var title = assembly.GetCustomAttribute<AssemblyTitleAttribute>()?.Title;
+            var version = assembly.GetName().Version?.ToString() ?? "0.0.0.0";
+
+            this.Title = $"{title} について"; // ウィンドウ自体のタイトル
+            this.AppNameText.Text = title;    // 画面内のアプリ名
+            this.VersionText.Text = $"Version {version}";
+        }
+
+        private void CloseButton_Click(object sender, RoutedEventArgs e) {
+            this.Close();
+        }
+    }
+}
+
+---END-FILE---:src/View/AboutWindow.xaml.cs
+---BEGIN-FILE---:src/View/DwmThumbnailView.cs
+using System;
+using System.Diagnostics;
+using System.Windows;
+using System.Windows.Media;
+using System.Windows.Interop;
+using WindowSorter.Core;
+using Brushes = System.Windows.Media.Brushes;
+using System.Windows.Controls;
+
+namespace WindowSorter.View;
+
+public class DwmThumbnailView : FrameworkElement {
+    private IntPtr _hThumbnail = IntPtr.Zero;
+    private IntPtr _destHandle = IntPtr.Zero;
+    private NativeMethods.RECT _lastRect;
+    private bool _lastVisible = false;
+
+    // サムネイルを表示するかフラグ
+    private static bool _isThumbnailReady = false;
+    public static bool IsThumbnailReady {
+        get => _isThumbnailReady;
+        set {
+            if (_isThumbnailReady != value) {
+                _isThumbnailReady = value;
+                IsThumbnailReadyChanged?.Invoke(null, EventArgs.Empty);
+            }
+        }
+    }
+    public static event EventHandler? IsThumbnailReadyChanged;
+
+    // 表示するhwnd
+    public static readonly DependencyProperty SourceHandleProperty =
+        DependencyProperty.Register(nameof(SourceHandle), typeof(IntPtr), typeof(DwmThumbnailView),
+            new PropertyMetadata(IntPtr.Zero, OnSourceHandleChanged));
+    public IntPtr SourceHandle {
+        get => (IntPtr)GetValue(SourceHandleProperty);
+        set => SetValue(SourceHandleProperty, value);
+    }
+
+    // クリッピングするXAML要素
+    public static readonly DependencyProperty ClippingElementProperty =
+    DependencyProperty.Register(nameof(ClippingElement), typeof(FrameworkElement), typeof(DwmThumbnailView),
+        new PropertyMetadata(null));
+
+    public FrameworkElement ClippingElement {
+        get => (FrameworkElement)GetValue(ClippingElementProperty);
+        set => SetValue(ClippingElementProperty, value);
+    }
+
+    public DwmThumbnailView() {
+        this.Loaded += OnLoaded;
+        this.Unloaded += OnUnloaded;
+        this.IsVisibleChanged += (s, e) => UpdateThumbnailStatus();
+        IsThumbnailReadyChanged += OnIsThumbnailReadyChanged;
+    }
+
+    private void OnLoaded(object sender, RoutedEventArgs e) {
+        var window = Window.GetWindow(this);
+        if (window != null) {
+            _destHandle = new WindowInteropHelper(window).Handle;
+            UpdateThumbnailStatus();
+        }
+    }
+
+    private void OnUnloaded(object sender, RoutedEventArgs e) {
+        IsThumbnailReadyChanged -= OnIsThumbnailReadyChanged;
+        StopRendering();
+        UnregisterThumbnail();
+    }
+
+    private void OnIsThumbnailReadyChanged(object? sender, EventArgs e) {
+        UpdateThumbnailStatus();
+    }
+
+    private static void OnSourceHandleChanged(DependencyObject d, DependencyPropertyChangedEventArgs e) {
+        if (d is DwmThumbnailView view) {
+            view.UpdateThumbnailStatus();
+        }
+    }
+
+    private void UpdateThumbnailStatus() {
+        bool shouldBeActive = IsThumbnailReady && this.IsVisible && SourceHandle != IntPtr.Zero && _destHandle != IntPtr.Zero;
+
+        if (shouldBeActive) {
+            if (_hThumbnail == IntPtr.Zero) {
+                RegisterThumbnail();
+            }
+            StartRendering();
+        } else {
+            StopRendering();
+            UnregisterThumbnail();
+        }
+    }
+
+    private void StartRendering() {
+        CompositionTarget.Rendering -= OnRendering;
+        CompositionTarget.Rendering += OnRendering;
+    }
+
+    private void StopRendering() {
+        CompositionTarget.Rendering -= OnRendering;
+    }
+
+    private void OnRendering(object? sender, EventArgs e) {
+        UpdateThumbnailPosition();
+    }
+
+    private void RegisterThumbnail() {
+        if (_destHandle == IntPtr.Zero || SourceHandle == IntPtr.Zero || _hThumbnail != IntPtr.Zero) return;
+
+        int hr = NativeMethods.DwmRegisterThumbnail(_destHandle, SourceHandle, out _hThumbnail);
+        if (hr != 0) {
+            Debug.WriteLine($"DwmRegisterThumbnail failed. HR: {hr:X}");
+            return;
+        }
+        _lastRect = default;
+        _lastVisible = false;
+        UpdateThumbnailPosition();
+    }
+
+    private void UnregisterThumbnail() {
+        if (_hThumbnail != IntPtr.Zero) {
+            NativeMethods.DwmUnregisterThumbnail(_hThumbnail);
+            _hThumbnail = IntPtr.Zero;
+        }
+    }
+
+    private void UpdateThumbnailPosition() {
+        if (_hThumbnail == IntPtr.Zero) return;
+
+        bool currentVisible = IsThumbnailReady && this.IsVisible && this.ActualWidth > 0 && this.ActualHeight > 0;
+
+        try {
+            var window = Window.GetWindow(this);
+            if (window == null) return;
+
+            var transform = this.TransformToAncestor(window);
+            var fullRect = transform.TransformBounds(new Rect(0, 0, this.ActualWidth, this.ActualHeight));
+            var rect = fullRect;
+
+            var clippingElement = ClippingElement;
+            if (clippingElement != null) {
+                var clipRect = clippingElement.TransformToAncestor(window).TransformBounds(new Rect(0, 0, clippingElement.ActualWidth, clippingElement.ActualHeight));
+
+                var intersected = Rect.Intersect(clipRect, fullRect);
+
+                if (intersected.IsEmpty) {
+                    currentVisible = false;
+                } else {
+                    rect = intersected;
+                }
+            }
+
+            var win32Rect = new NativeMethods.RECT(
+                (int)rect.Left,
+                (int)rect.Top,
+                (int)rect.Right,
+                (int)rect.Bottom);
+
+            // 状態や座標が変わっていないなら API を呼ばない
+            if (currentVisible == _lastVisible &&
+                win32Rect.Left == _lastRect.Left &&
+                win32Rect.Top == _lastRect.Top &&
+                win32Rect.Right == _lastRect.Right &&
+                win32Rect.Bottom == _lastRect.Bottom) {
+                return;
+            }
+
+            NativeMethods.DWM_THUMBNAIL_PROPERTIES props = new NativeMethods.DWM_THUMBNAIL_PROPERTIES {
+                dwFlags = NativeMethods.DWM_TNP_VISIBLE | NativeMethods.DWM_TNP_RECTDESTINATION | NativeMethods.DWM_TNP_OPACITY,
+                fVisible = currentVisible ? 1 : 0,
+                rcDestination = win32Rect,
+                opacity = 255,
+                fSourceClientAreaOnly = 0
+            };
+
+            if (NativeMethods.DwmQueryThumbnailSourceSize(_hThumbnail, out NativeMethods.SIZE size) == 0) {
+                double leftRatio = Math.Max(0, (rect.Left - fullRect.Left) / fullRect.Width);
+                double topRatio = Math.Max(0, (rect.Top - fullRect.Top) / fullRect.Height);
+                double rightRatio = Math.Max(0, (fullRect.Right - rect.Right) / fullRect.Width);
+                double bottomRatio = Math.Max(0, (fullRect.Bottom - rect.Bottom) / fullRect.Height);
+
+                props.dwFlags |= NativeMethods.DWM_TNP_RECTSOURCE;
+                props.rcSource = new NativeMethods.RECT(
+                    (int)(size.cx * leftRatio),
+                    (int)(size.cy * topRatio),
+                    (int)(size.cx * (1.0 - rightRatio)),
+                    (int)(size.cy * (1.0 - bottomRatio))
+                );
+            }
+
+            NativeMethods.DwmUpdateThumbnailProperties(_hThumbnail, ref props);
+
+            _lastRect = win32Rect;
+            _lastVisible = currentVisible;
+        } catch {
+
+        }
+    }
+
+    protected override void OnRender(DrawingContext drawingContext) {
+        drawingContext.DrawRectangle(Brushes.Transparent, null, new Rect(0, 0, ActualWidth, ActualHeight));
+    }
+}
+---END-FILE---:src/View/DwmThumbnailView.cs
+---BEGIN-FILE---:src/View/MainWindow.xaml
+<Window x:Class="WindowSorter.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:WindowSorter"
+        xmlns:vm="clr-namespace:WindowSorter.ViewModel"
+        xmlns:view="clr-namespace:WindowSorter.View"
+        mc:Ignorable="d"
+        Background="#666"
+        ShowInTaskbar="False"
+        AllowsTransparency="False"
+        WindowStyle="None"
+        Title="Window Sorter" Height="450" Width="800">
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="0"/>
+    </WindowChrome.WindowChrome>
+
+    <Window.Resources>
+        <!-- スクロールバースタイル -->
+        <Style TargetType="{x:Type ScrollBar}">
+            <Setter Property="Width" Value="8"/>
+            <Setter Property="MinWidth" Value="0"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type ScrollBar}">
+                        <Grid Background="{TemplateBinding Background}">
+                            <Track Name="PART_Track" IsDirectionReversed="True">
+                                <Track.Thumb>
+                                    <Thumb Background="#44FFFFFF">
+                                        <Thumb.Template>
+                                            <ControlTemplate TargetType="{x:Type Thumb}">
+                                                <Border Background="{TemplateBinding Background}" CornerRadius="4" Margin="1,0" />
+                                            </ControlTemplate>
+                                        </Thumb.Template>
+                                    </Thumb>
+                                </Track.Thumb>
+                            </Track>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Window.DataContext>
+        <vm:MainWindowVM/>
+    </Window.DataContext>
+
+    <Grid Background="#666">
+        <Grid.ContextMenu>
+            <ContextMenu>
+                <MenuItem Header="設定(_S)" Click="MenuSettings_Click" />
+                <Separator />
+                <MenuItem Header="Window Sorter について(_A)" Click="MenuAbout_Click" />
+            </ContextMenu>
+        </Grid.ContextMenu>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="1" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- 検索・選択情報領域 -->
+        <Grid Grid.Row="0" Margin="20,15" HorizontalAlignment="Stretch">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <!-- 検索ボックス -->
+            <Border Grid.Column="0" Background="#888" CornerRadius="4" Width="350" Padding="10,5">
+                <TextBox x:Name="SearchTextBox" 
+                         Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
+                         Background="Transparent" 
+                         Foreground="#EFEFEF" 
+                         BorderThickness="0" 
+                         FontSize="16"
+                         VerticalContentAlignment="Center" />
+            </Border>
+
+            <!-- 選択中のウィンドウタイトル表示ボックス -->
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="20,0,0,0">
+                <TextBlock Text="選択中: " Foreground="#CCC" FontSize="12" VerticalAlignment="Center" Margin="0,0,10,0" />
+                <TextBlock Text="{Binding SelectedWindow.WindowTitle}" 
+                               Foreground="#EFEFEF" 
+                               FontSize="16" 
+                               VerticalAlignment="Center" 
+                               TextTrimming="CharacterEllipsis"/>
+                <TextBlock Text="{Binding SelectedWindow.ProcessName, StringFormat='- {0}'}" 
+                           Margin="10,0,0,0"
+                           Foreground="#CCC" 
+                           FontSize="16" 
+                           VerticalAlignment="Center" 
+                           TextTrimming="CharacterEllipsis"/>
+            </StackPanel>
+        </Grid>
+
+        <!-- 区切り線 -->
+        <Rectangle Grid.Row="1" Fill="#EEE" Height="1" HorizontalAlignment="Stretch" Margin="20,0" />
+
+        <!-- ウィンドウ表示領域 -->
+        <!-- 全体はスクロールビュー -->
+        <ScrollViewer Grid.Row="2" x:Name="MainScrollViewer" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" Focusable="True" FocusVisualStyle="{x:Null}">
+
+            <!-- ItemsControl ... 分類グループ -->
+            <ItemsControl 
+                x:Name="GroupList" 
+                Margin="10"
+                ItemsSource="{Binding WindowGroupList}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Expander IsExpanded="{Binding IsExpanded}" Margin="0,0,0,20">
+                            <Expander.Header>
+                                <!-- グループタイトル -->
+                                <TextBlock Text="{Binding Name}" Foreground="#EFEFEF" FontWeight="Bold" FontSize="18" Margin="0,0,0,5" />
+                            </Expander.Header>
+
+                            <!-- ItemsControl ... ウィンドウ一覧 -->
+                            <ItemsControl ItemsSource="{Binding WindowList}">
+
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <WrapPanel Orientation="Horizontal" />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border x:Name="WindowItemBorder" Margin="5" Padding="2" CornerRadius="4" ClipToBounds="True"
+                                                Width="{Binding WindowItemWidth, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                Cursor="Hand" MouseMove="WindowItem_MouseMove">
+                                            <Border.Style>
+                                                <Style TargetType="Border">
+                                                    <Setter Property="BorderThickness" Value="2"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                                            <Setter Property="BorderBrush" Value="#007AFF"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Border.Style>
+
+                                            <Border.InputBindings>
+                                                <MouseBinding MouseAction="LeftClick" Command="{Binding TopMostCommand}" />
+                                            </Border.InputBindings>
+
+                                            <StackPanel>
+                                                <Border Background="#3A3A3A" Padding="6,4" Height="40">
+                                                    <StackPanel>
+                                                        <TextBlock Text="{Binding WindowTitle}" Foreground="#EFEFEF" TextWrapping="NoWrap" FontSize="13" TextTrimming="CharacterEllipsis"/>
+                                                        <TextBlock Text="{Binding ProcessName}" Foreground="#CCC" FontSize="10" TextTrimming="CharacterEllipsis" Margin="0,0,0,0" />
+                                                    </StackPanel>
+                                                </Border>
+
+                                                <view:DwmThumbnailView SourceHandle="{Binding Handle}" 
+                                                                       Width="{Binding ThumbnailWidth, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                       Height="{Binding ThumbnailHeight, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                       ClippingElement="{Binding ElementName=MainScrollViewer}" />
+
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </Expander>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </ScrollViewer>
+    </Grid>
+</Window>
+
+---END-FILE---:src/View/MainWindow.xaml
+---BEGIN-FILE---:src/View/MainWindow.xaml.cs
+using System.Diagnostics;
+using System.Text;
+using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Data;
+using System.Windows.Documents;
+using System.Windows.Input;
+using System.Windows.Interop;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using System.Windows.Navigation;
+using System.Windows.Shapes;
+using System.Windows.Threading;
+using WindowSorter.Core;
+using WindowSorter.Model;
+using WindowSorter.Model.HotKey;
+using WindowSorter.View;
+using WindowSorter.View.Settings;
+using WindowSorter.ViewModel;
+using Point = System.Windows.Point;
+
+namespace WindowSorter {
+    /// <summary>
+    /// Interaction logic for MainWindow.xaml
+    /// </summary>
+    public partial class MainWindow : Window {
+        public double ThumbnailWidth => SettingsService.Current.ThumbnailWidth;
+        public double ThumbnailHeight => SettingsService.Current.ThumbnailHeight;
+        public double WindowItemWidth => ThumbnailWidth + 8; // BorderThickness(2*2) + Padding(2*2)
+
+        private static readonly double SCREEN_SIZE_RATIO = 0.82;
+
+        private List<(WindowInformationVM VM, Border Element, Point Pos)> _thumbnaiInfoList = new ();
+
+        public MainWindow() {
+            InitializeComponent();
+
+            ApplyScreenSize();
+
+            // ---------------------------------------------------
+            // イベントハンドラ
+            // ---------------------------------------------------
+            // 閉じるボタン
+            this.Closing += (sender, e) => {
+                e.Cancel = true;
+                this.HideWindow();
+            };
+
+            // ウィンドウ外クリックで非表示(Deactivatedを補足)
+            this.Deactivated += (sender, e) => {
+#if !DEBUG
+                this.HideWindow();
+#endif
+            };
+
+            // LayoutUpdated
+            // サムネイルの座標情報を更新
+            this.LayoutUpdated += (sender, e) => {
+                this.UpdateThumbnailPos();
+            };
+
+            // KeyDownイベント
+            this.PreviewKeyDown += (s, e) => {
+                switch (e.Key) {
+                case Key.Escape:
+                    if (SearchTextBox.IsKeyboardFocused) {
+                        // 検索ボックスにフォーカスが当たっていたら、
+                        // フォーカスを外す
+                        MainScrollViewer.Focus();
+                    } else {
+                        // 検索ボックスにフォーカスがない場合は、
+                        // 画面を閉じる
+                        this.HideWindow();
+                    }
+                    e.Handled = true;
+                    break;
+
+                case Key.Enter: {
+                    // Enter
+                    if (this.DataContext is MainWindowVM vm) {
+                        if (e.Key == Key.Enter) {
+                            if (vm.SelectedWindow != null) {
+                                vm.SelectedWindow.TopMostCommand.Execute(null);
+                                this.HideWindow();
+                                e.Handled = true;
+                            }
+                        }
+                    }
+                    break;
+                }
+                case Key.Left:
+                case Key.Right:
+                case Key.Up:
+                case Key.Down: {
+                    if (this.DataContext is MainWindowVM vm) {
+                        // サムネイルの座標情報
+                        if (_thumbnaiInfoList.Count == 0) return;
+
+                        // 今選択状態のサムネイル
+                        var current = _thumbnaiInfoList.FirstOrDefault(x => x.VM == vm.SelectedWindow);
+
+                        // 移動先のサムネイル のViewModel
+                        object? nextVM = null;
+
+                        if (e.Key == Key.Left || e.Key == Key.Right) {
+                            // 左右キー
+                            int index = _thumbnaiInfoList.IndexOf(current);
+
+                            int nextIndex = (e.Key == Key.Left) ? index - 1 : index + 1;
+                            
+                            if (nextIndex >= 0 && nextIndex < _thumbnaiInfoList.Count) {
+                                nextVM = _thumbnaiInfoList[nextIndex].VM;
+                            }
+                        } else {
+                            // 上下キー
+                            var candidates = _thumbnaiInfoList.Where(x => {
+                                if (e.Key == Key.Up) {
+                                    // 上：自分より上にあるサムネイル
+                                    return x.Pos.Y < current.Pos.Y;
+                                } else {
+                                    // 下：自分より下にあるサムネイル
+                                    return x.Pos.Y > current.Pos.Y;
+                                }
+
+                            }).ToList();
+
+                            if (candidates.Count != 0) {
+                                // 先にY座標を決める ... Y座標は各行で揃ってレイアウトされている前提
+                                double targetY;
+                                if (e.Key == Key.Up) {
+                                    // 上：自分より上にあるサムネイルの中で、一番大きいY座標が、一番近いサムネイル
+                                    targetY = candidates.Max(x => x.Pos.Y);
+                                } else {
+                                    // 下：自分よ下にあるサムネイルの中で、一番小さいY座標が、一番近いサムネイル
+                                    targetY = candidates.Min(x => x.Pos.Y);
+                                }
+
+                                // X座標が最も近いものを選択
+                                nextVM = candidates
+                                    .Where(x => x.Pos.Y == targetY)
+                                    .OrderBy(x => Math.Abs(x.Pos.X - current.Pos.X))
+                                    .FirstOrDefault().VM;
+                            }
+                        }
+
+                        if (nextVM is WindowInformationVM target) {
+                            vm.SelectedWindow = target;
+
+                            // スクロール
+                            var targetElement = _thumbnaiInfoList.First(x => x.VM == target).Element;
+                            targetElement.BringIntoView();
+                        }
+                        e.Handled = true;
+                    }
+
+                    break;
+                }
+
+                case Key.F:
+                    if ((Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control) {
+                        SearchTextBox.Focus();
+                        e.Handled = true;
+                    }
+                    break;
+
+                default:
+                    break;
+                }
+            };
+        }
+
+        private long _lastHideTime = 0;
+
+        // ウィンドウ表示
+        // 白いチラツキを抑止するために対策している
+        public void ShowWindow(bool iconClicked = false) {
+            // NOTE:
+            // アイコンクリックで非表示にならずに再表示されることへの対策
+            // 250ms以下なら、反応しない。
+            if (iconClicked && System.DateTime.Now.Ticks / 10000 - _lastHideTime < 250) {
+                return;
+            }
+
+            var helper = new WindowInteropHelper(this);
+            IntPtr handle = helper.EnsureHandle();
+
+            // サムネイル非表示 (一瞬サムネイルだけ表示されるのを回避)
+            DwmThumbnailView.IsThumbnailReady = false;
+
+            // DWM APIでクローク
+            int cloak = 1;
+            NativeMethods.DwmSetWindowAttribute(handle, NativeMethods.DWMWA_CLOAK, ref cloak, sizeof(int));
+
+            // ウィンドウ表示
+            // Cloakされているのでまだ見えない
+            if (!this.IsVisible) {
+                this.Show();
+            }
+            this.Activate();
+
+            // ウィンドウ一覧を更新
+            if (this.DataContext is MainWindowVM vm) {
+                vm.Refresh();
+                this.UpdateLayout();
+            }
+
+            // サムネイル表示
+            DwmThumbnailView.IsThumbnailReady = true;
+
+            // WPFの描画を待ってからUncloak
+            EventHandler? handler = null;
+            handler = (s, e) => {
+                CompositionTarget.Rendering -= handler;
+
+                _ = this.Dispatcher.InvokeAsync(async () => {
+                    // さらに少しだけ待つ
+                    await Task.Delay((int)SettingsService.Current.ShowWindowDelay);
+                    
+                    NativeMethods.DwmFlush();
+
+                    // Uncloak
+                    int uncloak = 0;
+                    NativeMethods.DwmSetWindowAttribute(handle, NativeMethods.DWMWA_CLOAK, ref uncloak, sizeof(int));
+
+                    // 最前面、フォーカスを当てて、マウスホイールを確実に反応させる
+                    NativeMethods.SetForegroundWindow(new WindowInteropHelper(this).Handle);
+                    SearchTextBox.Focus();
+
+                    // サムネイル座標を取得
+                    UpdateThumbnailPos();
+
+                }, DispatcherPriority.ApplicationIdle);
+            };
+            CompositionTarget.Rendering += handler;
+        }
+
+        // ウィンドウ非表示
+        public void HideWindow() {
+            // 設定画面などの「子ウィンドウ」を開いている間は、メインウィンドウを隠さないようにする
+            if (this.OwnedWindows.Count == 0) {
+                DwmThumbnailView.IsThumbnailReady = false;
+                this.Hide();
+                _lastHideTime = System.DateTime.Now.Ticks / 10000;
+            }
+        }
+
+        // ウィンドウ表示・非表示をトグルする
+        public void ToggleWindowVisible() {
+            if (IsVisible && IsActive) {
+                HideWindow();
+            } else {
+                ShowWindow();
+            }
+        }
+
+        // ウィンドウサムネイルの座標情報を取得
+        private void UpdateThumbnailPos() {
+            var results = new List<(WindowInformationVM VM, Border Element, Point Pos)>();
+
+            foreach (var border in FindVisualChildren<Border>(GroupList)) {
+                if (border.Name != "WindowItemBorder")
+                    continue;
+
+                if (border.DataContext is not WindowInformationVM vm)
+                    continue;
+
+                try {
+                    var pos = border.TransformToAncestor(MainScrollViewer).Transform(new Point(0, 0));
+                    results.Add((vm, border, pos));
+                } catch {
+
+                }
+            }
+            this._thumbnaiInfoList = results;
+        }
+
+
+        // 指定した要素から、指定した型の子要素を再帰的に探す
+        private static IEnumerable<T> FindVisualChildren<T>(DependencyObject? depObj) where T : DependencyObject {
+            if (depObj != null) {
+                for (int i = 0; i < VisualTreeHelper.GetChildrenCount(depObj); i++) {
+                    DependencyObject child = VisualTreeHelper.GetChild(depObj, i);
+                    if (child != null && child is T) {
+                        yield return (T)child;
+                    }
+                    foreach (T childOfChild in FindVisualChildren<T>(child)) {
+                        yield return childOfChild;
+                    }
+                }
+            }
+        }
+
+        private Point _lastMousePosition;
+
+        // マウス移動で選択状態を更新
+        private void WindowItem_MouseMove(object sender, System.Windows.Input.MouseEventArgs e) {
+            // ウィンドウ全体からの相対座標を取得
+            Point currentPos = e.GetPosition(this);
+
+            // マウスが物理的に動いていない（UIが下で動いただけ）なら無視
+            if (currentPos == _lastMousePosition)
+                return;
+
+            _lastMousePosition = currentPos;
+
+            if (sender is FrameworkElement element && element.DataContext is WindowInformationVM windowVM) {
+                if (this.DataContext is MainWindowVM vm) {
+                    if (vm.SelectedWindow == windowVM)
+                        return;
+
+                    vm.SelectedWindow = windowVM;
+                }
+            }
+        }
+
+        // ウィンドウ全体の位置、大きさ調整
+        private void ApplyScreenSize() {
+            // サイズはプライマリウィンドウのサイズに対する割合にする
+            double screenWidth = SystemParameters.PrimaryScreenWidth;
+            double screenHeight = SystemParameters.PrimaryScreenHeight;
+            this.Width = screenWidth * SCREEN_SIZE_RATIO;
+            this.Height = screenHeight * SCREEN_SIZE_RATIO;
+            this.Left = (screenWidth - this.Width) / 2;
+            this.Top = (screenHeight - this.Height) / 2;
+        }
+
+        private void MenuSettings_Click(object sender, RoutedEventArgs e) {
+            if (WindowService.Instance.ShowDialog<SettingsMainWindow>(this) == true) {
+                // 設定保存後にホットキーを再登録
+                HotKeyService.Register(SettingsService.Current.HotKeyModifier, SettingsService.Current.HotKey);
+            }
+        }
+
+        private void MenuAbout_Click(object sender, RoutedEventArgs e) {
+            WindowService.Instance.ShowDialog<AboutWindow>(this);
+        }
+    }
+}
+---END-FILE---:src/View/MainWindow.xaml.cs
+---BEGIN-FILE---:src/View/Settings/SettingsMainWindow.xaml
+<Window x:Class="WindowSorter.View.Settings.SettingsMainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:sys="clr-namespace:System;assembly=mscorlib"
+        xmlns:local="clr-namespace:WindowSorter.View.Settings"
+        xmlns:vm="clr-namespace:WindowSorter.ViewModel.Settings"
+        xmlns:model_group="clr-namespace:WindowSorter.Model.Grouping"
+        mc:Ignorable="d"
+        Title="設定" Height="650" Width="950"
+        WindowStartupLocation="CenterOwner"
+        d:DataContext="{d:DesignInstance Type=vm:SettingsDataVM}">
+
+    <Window.Resources>
+        <!-- 真偽値 -> 表示/非表示 コンバーター -->
+        <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
+
+        <!-- Enum値をComboBoxで表示するための設定 -->
+        <ObjectDataProvider x:Key="TargetEnumValues" MethodName="GetValues" ObjectType="{x:Type sys:Enum}">
+            <ObjectDataProvider.MethodParameters>
+                <x:Type TypeName="model_group:Target" />
+            </ObjectDataProvider.MethodParameters>
+        </ObjectDataProvider>
+        <ObjectDataProvider x:Key="OperatorEnumValues" MethodName="GetValues" ObjectType="{x:Type sys:Enum}">
+            <ObjectDataProvider.MethodParameters>
+                <x:Type TypeName="model_group:Operator" />
+            </ObjectDataProvider.MethodParameters>
+        </ObjectDataProvider>
+    </Window.Resources>
+    
+    <Window.DataContext>
+        <vm:SettingsDataVM/>
+    </Window.DataContext>
+    
+    <Grid Margin="10">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="180" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- 左側：メニューナビゲーション -->
+        <Border Grid.Column="0" Grid.Row="0" BorderBrush="#CCC" BorderThickness="0,0,1,0" Margin="0,0,10,0">
+            <ListBox x:Name="NavigationMenu" BorderThickness="0" Background="Transparent" SelectedIndex="0">
+                <ListBoxItem x:Name="MenuGeneral" Content="全般" Padding="10,8" />
+                <ListBoxItem x:Name="MenuGroup" Content="グループ設定" Padding="10,8" />
+                <ListBoxItem x:Name="MenuRule" Content="ルール設定" Padding="10,8" />
+            </ListBox>
+        </Border>
+
+        <!-- 右側：メイン編集エリア -->
+        <Grid Grid.Column="1" Grid.Row="0">
+
+            <!-- ******************************************************************** -->
+            <!-- 全般設定 ビュー -->
+            <!-- ******************************************************************** -->
+            <StackPanel x:Name="GeneralSettingsView" Visibility="{Binding IsSelected, ElementName=MenuGeneral, Converter={StaticResource BooleanToVisibilityConverter}, FallbackValue=Collapsed}">
+                <GroupBox Header="基本設定" Margin="0,0,0,10">
+                    <StackPanel Margin="10">
+
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="ホットキー" VerticalAlignment="Center" Width="100" />
+                            <TextBox Width="200" Height="25" Text="{Binding HotKeyText, Mode=OneWay}" IsReadOnly="True" 
+                                     Background="#F5F5F5" VerticalContentAlignment="Center" Padding="5,0"
+                                     PreviewKeyDown="HotKeyTextBox_PreviewKeyDown" Cursor="Arrow" />
+                            <Button Content="クリア" Command="{Binding ClearHotKeyCommand}" Margin="10,0,0,0" Width="60" Height="25" />
+                            <TextBlock Text="入力欄をクリックして、設定したいキーを押してください。" VerticalAlignment="Center"  FontSize="11" Margin="10,0,0,0" Foreground="#888" />
+                        </StackPanel>
+
+
+                        <StackPanel Orientation="Horizontal" Margin="0,15,0,0">
+                            <TextBlock Text="サムネイル" VerticalAlignment="Center" Width="100" />
+                            <TextBox Width="60" Height="25" Text="{Binding ThumbnailWidth}" VerticalContentAlignment="Center" Padding="5,0" />
+                            <TextBlock Text="px" VerticalAlignment="Center" Margin="5,0,0,0" />
+                            <TextBlock Text="×" VerticalAlignment="Center" Margin="10,0,10,0" />
+
+                            <TextBox Width="60" Height="25" Text="{Binding ThumbnailHeight}" VerticalContentAlignment="Center" Padding="5,0" />
+                            <TextBlock Text="px" VerticalAlignment="Center" Margin="5,0,0,0" />
+
+                            <TextBlock Text="デフォルト: 284x160" VerticalAlignment="Center"  FontSize="11" Margin="10,0,0,0" Foreground="#888" />
+                        </StackPanel>
+                        
+                        <CheckBox Content="ウィンドウ選択後、検索テキストをクリアする" 
+                                  IsChecked="{Binding ClearSearchOnWindowSelect}" 
+                                  Margin="0,15,0,0" />
+
+
+                    </StackPanel>
+                </GroupBox>
+                
+                <GroupBox Header="高度な設定" Margin="0,0,0,0">
+                    <StackPanel Margin="10">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="ウィンドウ表示の遅延時間" VerticalAlignment="Center" Margin="0,0,20,0" />
+                            <TextBox Width="100" Height="25" Text="{Binding ShowWindowDelay}" 
+                                     VerticalContentAlignment="Center" Padding="5,0" />
+                            <TextBlock Text="ms" VerticalAlignment="Center" Margin="10,0,0,0" />
+                        </StackPanel>
+                        <TextBlock Text="表示時の白いチラツキを軽減します。10ms程度を推奨。" FontSize="11" Margin="0,5,0,0" Foreground="#888" />
+                    </StackPanel>
+                </GroupBox>
+                
+            </StackPanel>
+
+            <!-- ******************************************************************** -->
+            <!-- グループ設定 ビュー -->
+            <!-- ******************************************************************** -->
+            <Grid x:Name="GroupSettingsView" Visibility="{Binding IsSelected, ElementName=MenuGroup, Converter={StaticResource BooleanToVisibilityConverter}, FallbackValue=Visible}">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="180" />
+                    <!-- グループ一覧 -->
+                    <RowDefinition Height="*" />
+                    <!-- 詳細編集エリア -->
+                </Grid.RowDefinitions>
+
+                <GroupBox Header="グループ" Margin="0,0,0,10">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <ListBox x:Name="GroupListBox" Margin="5" 
+                                 ItemsSource="{Binding GroupList}" 
+                                 SelectedItem="{Binding SelectedGroup}"
+                                 DisplayMemberPath="Name" />
+                        <StackPanel Grid.Column="1" Margin="5" VerticalAlignment="Top">
+                            <Button Content="追加" Command="{Binding AddGroupCommand}" Width="60" Margin="0,0,0,5" />
+                            <Button Content="削除" Command="{Binding RemoveGroupCommand}" CommandParameter="{Binding SelectedItem, ElementName=GroupListBox}" Width="60" Margin="0,0,0,5" />
+                            <Button Content="↑" Command="{Binding MoveUpGroupCommand}" CommandParameter="{Binding SelectedItem, ElementName=GroupListBox}" Width="60" Margin="0,0,0,5" />
+                            <Button Content="↓" Command="{Binding MoveDownGroupCommand}" CommandParameter="{Binding SelectedItem, ElementName=GroupListBox}" Width="60" Margin="0,0,0,5" />
+                        </StackPanel>
+                    </Grid>
+                </GroupBox>
+
+                <!-- 選択されたグループの詳細 -->
+                <Grid Grid.Row="1" IsEnabled="{Binding SelectedGroup, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <!-- グループ名 -->
+                        <RowDefinition Height="*" />
+                        <!-- ソートルール一覧 -->
+                        <RowDefinition Height="150" />
+                        <!-- 条件設定 -->
+                    </Grid.RowDefinitions>
+
+                    <StackPanel Orientation="Horizontal" Margin="0,5,0,10">
+                        <TextBlock Text="名前:" VerticalAlignment="Center" Margin="0,0,10,0" />
+                        <TextBox Width="300" Text="{Binding SelectedGroup.Name, UpdateSourceTrigger=PropertyChanged}" Padding="3" />
+                    </StackPanel>
+
+                    <GroupBox Grid.Row="1" Header="並び替えルール" Margin="0,0,0,10">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <ListBox x:Name="SortRuleListBox" Margin="5" 
+                                ItemsSource="{Binding SelectedGroup.SortRules}" 
+                                SelectedItem="{Binding SelectedSortRule}"
+                                DisplayMemberPath="Name" />
+                            <StackPanel Grid.Column="1" Margin="5" VerticalAlignment="Top">
+                                <Button Content="追加" Command="{Binding AddSortRuleCommand}" Width="60" Margin="0,0,0,5" />
+                                <Button Content="削除" Command="{Binding RemoveSortRuleCommand}" CommandParameter="{Binding SelectedItem, ElementName=SortRuleListBox}" Width="60" Margin="0,0,0,5" />
+                                <Button Content="↑" Command="{Binding MoveUpSortRuleCommand}" CommandParameter="{Binding SelectedItem, ElementName=SortRuleListBox}" Width="60" Margin="0,0,0,5" />
+                                <Button Content="↓" Command="{Binding MoveDownSortRuleCommand}" CommandParameter="{Binding SelectedItem, ElementName=SortRuleListBox}" Width="60" Margin="0,0,0,5" />
+                            </StackPanel>
+                        </Grid>
+                    </GroupBox>
+
+                    <GroupBox Grid.Row="2" Header="ルールの条件設定" IsEnabled="{Binding SelectedSortRule, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"></RowDefinition>
+                                <RowDefinition Height="*"></RowDefinition>
+                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel Grid.Row="0" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,5,0,10">
+                                <TextBlock Text="名前:" VerticalAlignment="Center" Margin="0,0,10,0" />
+                                <TextBox Width="300" Text="{Binding SelectedSortRule.Name, UpdateSourceTrigger=PropertyChanged}" Padding="3" />
+                            </StackPanel>
+
+                            <ListBox Grid.Row="1" Grid.Column="0" Margin="5" ItemsSource="{Binding SelectedSortRule.Conditions}" HorizontalContentAlignment="Stretch">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid Margin="0,2">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="対象:" VerticalAlignment="Center" Margin="0,0,5,0" />
+                                            <ComboBox Grid.Column="1" Width="100" Margin="0,0,10,0" 
+                                                ItemsSource="{Binding Source={StaticResource TargetEnumValues}}"
+                                                SelectedItem="{Binding Target}" />
+
+                                            <TextBlock Grid.Column="2" Text="方法:" VerticalAlignment="Center" Margin="0,0,5,0" />
+                                            <ComboBox Grid.Column="3" Width="100" Margin="0,0,10,0" 
+                                                ItemsSource="{Binding Source={StaticResource OperatorEnumValues}}"
+                                                SelectedItem="{Binding Operator}" />
+
+                                            <TextBox Grid.Column="4" Text="{Binding Value, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,10,0" Padding="2" />
+
+                                            <Button Grid.Column="5" Content="削除" Width="40" 
+                                                Command="{Binding DataContext.RemoveSortRuleConditionCommand, RelativeSource={RelativeSource AncestorType=Window}}" 
+                                                CommandParameter="{Binding}" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                            <StackPanel Grid.Row="1" Grid.Column="1" Margin="5">
+                                <Button Content="追加" Command="{Binding AddSortRuleConditionCommand}" Width="60" Margin="0,0,0,5" />
+                            </StackPanel>
+                        </Grid>
+                    </GroupBox>
+                </Grid>
+            </Grid>
+
+            <!-- ******************************************************************** -->
+            <!-- ルール設定ビュー -->
+            <!-- ******************************************************************** -->
+            <Grid x:Name="RuleSettingsView" Visibility="{Binding IsSelected, ElementName=MenuRule, Converter={StaticResource BooleanToVisibilityConverter}, FallbackValue=Visible}">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="180" />
+                    <!-- ルール一覧 -->
+                    <RowDefinition Height="*" />
+                    <!-- 詳細編集エリア -->
+                </Grid.RowDefinitions>
+
+                <GroupBox Header="ルール" Margin="0,0,0,10">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <ListBox x:Name="RuleListBox" Margin="5" 
+                                 ItemsSource="{Binding GroupingRuleList}" 
+                                 SelectedItem="{Binding SelectedGroupingRule}"
+                                 DisplayMemberPath="Name" />
+                        <StackPanel Grid.Column="1" Margin="5" VerticalAlignment="Top">
+                            <Button Content="追加" Command="{Binding AddGroupingRuleCommand}" Width="60" Margin="0,0,0,5" />
+                            <Button Content="削除" Command="{Binding RemoveGroupingRuleCommand}" CommandParameter="{Binding SelectedItem, ElementName=RuleListBox}" Width="60" Margin="0,0,0,5" />
+                            <Button Content="↑" Command="{Binding MoveUpGroupingRuleCommand}" CommandParameter="{Binding SelectedItem, ElementName=RuleListBox}" Width="60" Margin="0,0,0,5" />
+                            <Button Content="↓" Command="{Binding MoveDownGroupingRuleCommand}" CommandParameter="{Binding SelectedItem, ElementName=RuleListBox}" Width="60" Margin="0,0,0,5" />
+                        </StackPanel>
+                    </Grid>
+                </GroupBox>
+
+                <!-- 選択されたルールの詳細 -->
+                <Grid Grid.Row="1" IsEnabled="{Binding SelectedGroupingRule, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <!-- 基本情報 -->
+                        <RowDefinition Height="Auto" />
+                        <!-- 評価方法 -->
+                        <RowDefinition Height="*" />
+                        <!-- 条件一覧 -->
+                    </Grid.RowDefinitions>
+
+                    <Grid Margin="0,5,0,10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="名前:" VerticalAlignment="Center" Margin="0,0,10,0" />
+                        <TextBox Grid.Column="1" Text="{Binding SelectedGroupingRule.Name, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,20,0" Padding="3" />
+
+                        <TextBlock Grid.Column="2" Text="移動先:" VerticalAlignment="Center" Margin="0,0,10,0" />
+                        <ComboBox Grid.Column="3" 
+                                  ItemsSource="{Binding GroupOptions}" 
+                                  DisplayMemberPath="Name" 
+                                  SelectedValuePath="ID" 
+                                  SelectedValue="{Binding SelectedGroupingRule.MoveTargetGroupID}" 
+                                  Padding="3" />
+                    </Grid>
+
+                    <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,10">
+                        <TextBlock Text="評価方法:" VerticalAlignment="Center" Margin="0,0,10,0" />
+                        <ComboBox Width="150" SelectedValue="{Binding SelectedGroupingRule.EvalType}" SelectedValuePath="Tag">
+                            <ComboBoxItem Content="AND (全て一致)" Tag="{x:Static model_group:EvalType.AND}" />
+                            <ComboBoxItem Content="OR (いずれか一致)" Tag="{x:Static model_group:EvalType.OR}" />
+                        </ComboBox>
+                    </StackPanel>
+
+                    <GroupBox Grid.Row="2" Header="条件">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <ListBox Margin="5" ItemsSource="{Binding SelectedGroupingRule.Conditions}" HorizontalContentAlignment="Stretch">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid Margin="0,2">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="対象:" VerticalAlignment="Center" Margin="0,0,5,0" />
+                                            <ComboBox Grid.Column="1" Width="100" Margin="0,0,10,0" 
+                                                      ItemsSource="{Binding Source={StaticResource TargetEnumValues}}"
+                                                      SelectedItem="{Binding Target}" />
+
+                                            <TextBlock Grid.Column="2" Text="方法:" VerticalAlignment="Center" Margin="0,0,5,0" />
+                                            <ComboBox Grid.Column="3" Width="100" Margin="0,0,10,0" 
+                                                      ItemsSource="{Binding Source={StaticResource OperatorEnumValues}}"
+                                                      SelectedItem="{Binding Operator}" />
+
+                                            <TextBox Grid.Column="4" Text="{Binding Value, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,10,0" Padding="2" />
+
+                                            <Button Grid.Column="5" Content="削除" Width="40" 
+                                                    Command="{Binding DataContext.RemoveGroupingRuleConditionCommand, RelativeSource={RelativeSource AncestorType=Window}}" 
+                                                    CommandParameter="{Binding}" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                            <StackPanel Grid.Column="1" Margin="5">
+                                <Button Content="追加" Command="{Binding AddGroupingRuleConditionCommand}" Width="60" Margin="0,0,0,5" />
+                            </StackPanel>
+                        </Grid>
+                    </GroupBox>
+                </Grid>
+            </Grid>
+        </Grid>
+
+        <!-- ******************************************************************** -->
+        <!-- フッターボタン -->
+        <!-- ******************************************************************** -->
+        <StackPanel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
+            <Button Content="OK" Command="{Binding SaveCommand}" Width="100" Height="30"  Margin="0,0,10,0" />
+            <Button Content="キャンセル" Command="{Binding CancelCommand}" Width="100" Height="30"/>
+        </StackPanel>
+    </Grid>
+</Window>
+
+---END-FILE---:src/View/Settings/SettingsMainWindow.xaml
+---BEGIN-FILE---:src/View/Settings/SettingsMainWindow.xaml.cs
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Data;
+using System.Windows.Documents;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using System.Windows.Shapes;
+using WindowSorter.Core;
+using WindowSorter.Model.Grouping;
+using WindowSorter.ViewModel.Settings;
+
+namespace WindowSorter.View.Settings {
+    /// <summary>
+    /// SettingsMainWindow.xaml の相互作用ロジック
+    /// </summary>
+    public partial class SettingsMainWindow : Window {
+        public SettingsMainWindow() {
+            InitializeComponent();
+        }
+
+        private void HotKeyTextBox_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e) {
+            e.Handled = true;
+
+            // 修飾キーの状態を取得
+            ModifierKeys modifier = Keyboard.Modifiers;
+
+            // 実際に押されたキーを取得
+            Key key = (e.Key == Key.System) ? e.SystemKey : e.Key;
+
+            // 修飾キー自体がメインキーとして押された場合は無視
+            if (key == Key.LeftShift || key == Key.RightShift ||
+                key == Key.LeftCtrl || key == Key.RightCtrl ||
+                key == Key.LeftAlt || key == Key.RightAlt ||
+                key == Key.LWin || key == Key.RWin) {
+                return;
+            }
+
+            if (DataContext is SettingsDataVM vm) {
+                vm.SetHotKey(modifier, key);
+            }
+        }
+    }
+}
+
+---END-FILE---:src/View/Settings/SettingsMainWindow.xaml.cs
+---BEGIN-FILE---:src/ViewModel/MainWindowVM.cs
+using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.ComponentModel;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using System.Windows.Data;
+using WindowSorter.Core;
+using WindowSorter.Model;
+using WindowSorter.Model.Grouping;
+
+namespace WindowSorter.ViewModel {
+    public class MainWindowVM : NotificationObject {
+
+        // グルーピングのリスト
+        private ObservableCollection<WindowGroupVM> _windowGroupList;
+        public ObservableCollection<WindowGroupVM> WindowGroupList {
+            get {
+                return _windowGroupList;
+            }
+            set {
+                if (_windowGroupList != value) {
+                    SetProperty(ref this._windowGroupList, value);
+                    
+                    _windowGroupListView = CollectionViewSource.GetDefaultView(_windowGroupList);
+                    _windowGroupListView.Filter = FilterGroup;
+                    RaisePropertyChanged(nameof(WindowGroupListView));
+                }
+            }
+        }
+
+        // グルーピングのリスト CollectionView
+        private ICollectionView _windowGroupListView;
+        public ICollectionView WindowGroupListView {
+            get {
+                if (_windowGroupListView == null && _windowGroupList != null) {
+                    _windowGroupListView = CollectionViewSource.GetDefaultView(_windowGroupList);
+                    _windowGroupListView.Filter = FilterGroup;
+                }
+                return _windowGroupListView;
+            }
+        }
+
+        // 検索文字列
+        private string _searchText = string.Empty;
+        public string SearchText {
+            get => _searchText;
+            set {
+                if (SetProperty(ref _searchText, value)) {
+                    // 各グループの検索文字を更新
+                    if (_windowGroupList != null) {
+                        foreach (var group in _windowGroupList) {
+                            group.SearchText = value;
+                        }
+                    }
+                    // グループ自体の表示・非表示を再評価
+                    WindowGroupListView?.Refresh();
+
+                    // 検索結果の1番目を選択
+                    SelectFirstVisible();
+                }
+            }
+        }
+
+        // 選択状態のウィンドウ
+        private WindowInformationVM _selectedWindow;
+        public WindowInformationVM SelectedWindow {
+            get => _selectedWindow;
+            set {
+                if (_selectedWindow != value) {
+                    if (_selectedWindow != null) {
+                        _selectedWindow.IsSelected = false;
+                    }
+
+                    _selectedWindow = value;
+
+                    if (_selectedWindow != null) {
+                        _selectedWindow.IsSelected = true;
+                    }
+                    RaisePropertyChanged();
+                }
+            }
+        }
+
+        // 表示されているウィンドウの中から最初を選択
+        private void SelectFirstVisible() {
+            var first = GetVisibleWindows().FirstOrDefault();
+            SelectedWindow = first;
+        }
+
+        // 表示されているウィンドウを列挙
+        private IEnumerable<WindowInformationVM> GetVisibleWindows() {
+            if (_windowGroupList == null) 
+                return Enumerable.Empty<WindowInformationVM>();
+
+            return _windowGroupList
+                .Where(x => x.HasVisibleWindows)
+                .SelectMany(x => x.WindowListView.Cast<WindowInformationVM>());
+        }
+
+        // ウィンドウ 選択位置を移動
+        public void MoveSelection(int deltaX, int deltaY, int columns) {
+            var visibleWindows = GetVisibleWindows().ToList();
+            if (!visibleWindows.Any()) return;
+
+            int currentIndex = visibleWindows.IndexOf(SelectedWindow);
+            int nextIndex;
+
+            if (currentIndex == -1) {
+                nextIndex = 0;
+            } else {
+                // deltaYがある場合はcolumns分移動
+                int delta = deltaX + (deltaY * columns);
+                nextIndex = currentIndex + delta;
+            }
+
+            if (nextIndex < 0) nextIndex = 0;
+            if (nextIndex >= visibleWindows.Count) nextIndex = visibleWindows.Count - 1;
+
+            SelectedWindow = visibleWindows[nextIndex];
+        }
+
+        private bool FilterGroup(object item) {
+            if (item is WindowGroupVM group) {
+                // グループ内に表示対象のウィンドウが1つでもあればグループを表示
+                return group.HasVisibleWindows;
+            }
+            return false;
+        }
+
+        // ウィンドウ一覧の更新
+        public void Refresh() {
+            // 現在の開閉状態をバックアップ
+            var currentStates = _windowGroupList?.ToDictionary(g => g.Name, g => g.IsExpanded);
+
+            List<WindowGroup> groups = WindowGroupingEngine.GetWindowGroupList(
+                SettingsService.Current.GroupingRuleList,
+                SettingsService.Current.GroupList
+            );
+
+            var newGroups = groups.Select(x => {
+                var vm = new WindowGroupVM(x, () => {
+                    if (SettingsService.Current.ClearSearchOnWindowSelect) {
+                        this.SearchText = string.Empty;
+                    }
+                }) { SearchText = this.SearchText };
+                // 以前の状態があれば引き継ぐ
+                if (currentStates != null && currentStates.TryGetValue(vm.Name, out bool isExpanded)) {
+                    vm.IsExpanded = isExpanded;
+                }
+                return vm;
+            });
+
+            this.WindowGroupList = new ObservableCollection<WindowGroupVM>(newGroups);
+
+            // 最初の1つを選択
+            SelectFirstVisible();
+        }
+    }
+}
+
+---END-FILE---:src/ViewModel/MainWindowVM.cs
+---BEGIN-FILE---:src/ViewModel/Settings/GroupingRuleVM.cs
+using System.Collections.ObjectModel;
+using System.Linq;
+using WindowSorter.Core;
+using WindowSorter.Model.Grouping;
+
+namespace WindowSorter.ViewModel.Settings {
+    /// <summary>
+    /// ウィンドウ振り分けルールの設定用ViewModel
+    /// </summary>
+    public class GroupingRuleVM : NotificationObject {
+        private readonly GroupingRule _model;
+
+        public string Name {
+            get => _model.Name;
+            set { _model.Name = value; RaisePropertyChanged(); }
+        }
+
+        public string MoveTargetGroupID {
+            get => _model.MoveTargetGroupID;
+            set { _model.MoveTargetGroupID = value; RaisePropertyChanged(); }
+        }
+
+        public EvalType EvalType {
+            get => _model.EvalType;
+            set { _model.EvalType = value; RaisePropertyChanged(); }
+        }
+
+        /// <summary>
+        /// 振り分け条件の一覧（画面バインド用）
+        /// </summary>
+        public ObservableCollection<Condition> Conditions { get; }
+
+        public GroupingRuleVM(GroupingRule model) {
+            _model = model;
+            Conditions = new ObservableCollection<Condition>(model.Conditions);
+        }
+
+        /// <summary>
+        /// 編集内容をModelに書き戻す
+        /// </summary>
+        public GroupingRule Pack() {
+            _model.Conditions = Conditions.ToList();
+            return _model;
+        }
+    }
+}
+
+---END-FILE---:src/ViewModel/Settings/GroupingRuleVM.cs
+---BEGIN-FILE---:src/ViewModel/Settings/SettingsDataVM.cs
+using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.Linq;
+using System.Windows.Input;
+using WindowSorter.Core;
+using WindowSorter.Model;
+using WindowSorter.Model.Grouping;
+
+namespace WindowSorter.ViewModel.Settings {
+    /// <summary>
+    /// 設定データ全体を管理するルートViewModel
+    /// </summary>
+    public class SettingsDataVM : NotificationObject {
+        private readonly SettingsData _model;
+
+        // -----------------------------------------------------------------
+        // データリスト
+        // -----------------------------------------------------------------
+        /// <summary>グループ</summary>
+        public ObservableCollection<WindowGroupVM> GroupList { get; }
+
+        /// <summary>振り分けルール</summary>
+        public ObservableCollection<GroupingRuleVM> GroupingRuleList { get; }
+
+        // -----------------------------------------------------------------
+        // ホットキー設定
+        // -----------------------------------------------------------------
+        private ModifierKeys _selectedModifier;
+        public ModifierKeys SelectedModifier {
+            get => _selectedModifier;
+            set {
+                if (SetProperty(ref _selectedModifier, value)) {
+                    RaisePropertyChanged(nameof(HotKeyText));
+                }
+            }
+        }
+
+        // -----------------------------------------------------------------
+        // サムネイルサイズ
+        // -----------------------------------------------------------------
+        private double _thumbnailWidth;
+        public double ThumbnailWidth {
+            get => _thumbnailWidth;
+            set => SetProperty(ref _thumbnailWidth, value);
+        }
+
+        private double _thumbnailHeight;
+        public double ThumbnailHeight {
+            get => _thumbnailHeight;
+            set => SetProperty(ref _thumbnailHeight, value);
+        }
+
+        // -----------------------------------------------------------------
+        // ウィンドウ表示までのディレイ
+        // -----------------------------------------------------------------
+        private uint _showWindowDelay;
+        public uint ShowWindowDelay {
+            get => _showWindowDelay;
+            set {
+                if (SetProperty(ref _showWindowDelay, value)) {
+                    RaisePropertyChanged(nameof(ShowWindowDelay));
+                }
+            }
+        }
+
+        // -----------------------------------------------------------------
+        // 検索ボックスをクリアするか
+        // -----------------------------------------------------------------
+        private bool _clearSearchOnWindowSelect;
+        public bool ClearSearchOnWindowSelect {
+            get => _clearSearchOnWindowSelect;
+            set {
+                if (SetProperty(ref _clearSearchOnWindowSelect, value)) {
+                    RaisePropertyChanged(nameof(ClearSearchOnWindowSelect));
+                }
+            }
+        }
+
+        private Key _selectedKey;
+        public Key SelectedKey {
+            get => _selectedKey;
+            set {
+                if (SetProperty(ref _selectedKey, value)) {
+                    RaisePropertyChanged(nameof(HotKeyText));
+                }
+            }
+        }
+
+        public string HotKeyText {
+            get {
+                if (SelectedKey == Key.None) return "未登録";
+
+                var sb = new System.Text.StringBuilder();
+                if (SelectedModifier.HasFlag(ModifierKeys.Control)) sb.Append("Ctrl + ");
+                if (SelectedModifier.HasFlag(ModifierKeys.Alt)) sb.Append("Alt + ");
+                if (SelectedModifier.HasFlag(ModifierKeys.Shift)) sb.Append("Shift + ");
+                if (SelectedModifier.HasFlag(ModifierKeys.Windows)) sb.Append("Win + ");
+
+                sb.Append(SelectedKey.ToString());
+                return sb.ToString();
+            }
+        }
+
+        /// <summary>
+        /// ホットキーをセットする（Viewから呼ばれる）
+        /// </summary>
+        public void SetHotKey(ModifierKeys modifier, Key key) {
+            _selectedModifier = modifier;
+            _selectedKey = key;
+            RaisePropertyChanged(nameof(HotKeyText));
+        }
+
+        // -----------------------------------------------------------------
+        // 選択状態の管理
+        // -----------------------------------------------------------------
+
+        private WindowGroupVM _selectedGroup;
+        public WindowGroupVM SelectedGroup {
+            get => _selectedGroup;
+            set {
+                if (SetProperty(ref _selectedGroup, value)) {
+                    // グループが変わったら、その中のソートルール選択もリセット
+                    SelectedSortRule = value?.SortRules.FirstOrDefault();
+                }
+            }
+        }
+
+        private SortRuleVM _selectedSortRule;
+        public SortRuleVM SelectedSortRule {
+            get => _selectedSortRule;
+            set => SetProperty(ref _selectedSortRule, value);
+        }
+
+        private GroupingRuleVM _selectedGroupingRule;
+        public GroupingRuleVM SelectedGroupingRule {
+            get => _selectedGroupingRule;
+            set => SetProperty(ref _selectedGroupingRule, value);
+        }
+
+        /// <summary>
+        /// 移動先グループの選択肢（ComboBox用。VMのリストをそのまま提供）
+        /// </summary>
+        public IEnumerable<WindowGroupVM> GroupOptions => GroupList;
+
+        // -----------------------------------------------------------------
+        // コマンド
+        // -----------------------------------------------------------------
+        // グループ設定 - グループ一覧
+        public DelegateCommand AddGroupCommand { get; }
+        public DelegateCommand RemoveGroupCommand { get; }
+        public DelegateCommand MoveUpGroupCommand { get; }
+        public DelegateCommand MoveDownGroupCommand { get; }
+
+        // グループ設定 - 並び替えルール
+        public DelegateCommand AddSortRuleCommand { get; }
+        public DelegateCommand RemoveSortRuleCommand { get; }
+        public DelegateCommand MoveUpSortRuleCommand { get; }
+        public DelegateCommand MoveDownSortRuleCommand { get; }
+        public DelegateCommand AddSortRuleConditionCommand { get; }
+        public DelegateCommand RemoveSortRuleConditionCommand { get; }
+
+        public DelegateCommand AddGroupingRuleCommand { get; }
+        public DelegateCommand RemoveGroupingRuleCommand { get; }
+        public DelegateCommand MoveUpGroupingRuleCommand { get; }
+        public DelegateCommand MoveDownGroupingRuleCommand { get; }
+
+        public DelegateCommand AddGroupingRuleConditionCommand { get; }
+        public DelegateCommand RemoveGroupingRuleConditionCommand { get; }
+        public DelegateCommand ClearHotKeyCommand { get; }
+        public DelegateCommand SaveCommand { get; }
+        public DelegateCommand CancelCommand { get; }
+
+        // -----------------------------------------------------------------
+        // コンストラクタ
+        // -----------------------------------------------------------------
+        public SettingsDataVM() {
+            // Modelを取得（クローンを編集）
+            _model = SettingsService.Current.GetClone();
+
+            // 全般の設定
+            SelectedModifier = _model.HotKeyModifier;
+            SelectedKey = _model.HotKey;
+            ShowWindowDelay = _model.ShowWindowDelay;
+            ClearSearchOnWindowSelect = _model.ClearSearchOnWindowSelect;
+            ThumbnailWidth = _model.ThumbnailWidth;
+            ThumbnailHeight = _model.ThumbnailHeight;
+
+            // グループ一覧とルールのViewModel
+            GroupList = new ObservableCollection<WindowGroupVM>(
+                _model.GroupList.Select(x => new WindowGroupVM(x)));
+
+            GroupingRuleList = new ObservableCollection<GroupingRuleVM>(
+                _model.GroupingRuleList.Select(x => new GroupingRuleVM(x)));
+
+            // デフォルト選択
+            SelectedGroup = GroupList.FirstOrDefault();
+            SelectedGroupingRule = GroupingRuleList.FirstOrDefault();
+
+            // -----------------------------------------------------------------
+            // ホットキー設定
+            // -----------------------------------------------------------------
+            ClearHotKeyCommand = new DelegateCommand(_ => {
+                SelectedKey = Key.None;
+                SelectedModifier = ModifierKeys.None;
+            });
+
+            // -----------------------------------------------------------------
+            // グループ設定 - グループ一覧
+            // -----------------------------------------------------------------
+            // 追加
+            AddGroupCommand = new DelegateCommand(_ => {
+                var newGroup = new WindowGroup { Name = "新規グループ", ID = Guid.NewGuid().ToString() };
+                var vm = new WindowGroupVM(newGroup);
+                GroupList.Add(vm);
+                SelectedGroup = vm;
+            });
+
+            // 削除
+            RemoveGroupCommand = new DelegateCommand(obj => {
+                if (obj is WindowGroupVM vm) GroupList.Remove(vm);
+            });
+
+            // 上
+            MoveUpGroupCommand = new DelegateCommand(obj => {
+                if (obj is WindowGroupVM vm) {
+                    var index = GroupList.IndexOf(vm);
+                    if (index > 0) GroupList.Move(index, index - 1);
+                }
+            });
+
+            // 下
+            MoveDownGroupCommand = new DelegateCommand(obj => {
+                if (obj is WindowGroupVM vm) {
+                    var index = GroupList.IndexOf(vm);
+                    if (index < GroupList.Count - 1) GroupList.Move(index, index + 1);
+                }
+            });
+
+            // -----------------------------------------------------------------
+            // グループ設定 - ソートルール一覧
+            // -----------------------------------------------------------------
+            // 新規
+            AddSortRuleCommand = new DelegateCommand(_ => {
+                if (SelectedGroup != null) {
+                    var newSortRule = new SortRule { Name = "新規並び替えルール" };
+                    var vm = new SortRuleVM(newSortRule);
+                    SelectedGroup.SortRules.Add(vm);
+                    SelectedSortRule = vm;
+                }
+            });
+
+            // 削除
+            RemoveSortRuleCommand = new DelegateCommand(obj => {
+                if (SelectedGroup != null && obj is SortRuleVM vm) {
+                    SelectedGroup.SortRules.Remove(vm);
+                }
+            });
+
+            // 上
+            MoveUpSortRuleCommand = new DelegateCommand(obj => {
+                if (SelectedGroup != null && obj is SortRuleVM vm) {
+                    var index = SelectedGroup.SortRules.IndexOf(vm);
+                    if (index > 0) SelectedGroup.SortRules.Move(index, index - 1);
+                }
+            });
+
+            // 下
+            MoveDownSortRuleCommand = new DelegateCommand(obj => {
+                if (SelectedGroup != null && obj is SortRuleVM vm) {
+                    var index = SelectedGroup.SortRules.IndexOf(vm);
+                    if (index < SelectedGroup.SortRules.Count - 1) SelectedGroup.SortRules.Move(index, index + 1);
+                }
+            });
+
+            // -----------------------------------------------------------------
+            // グループ設定 - 並び替えルールの条件
+            // -----------------------------------------------------------------
+            // 追加
+            AddSortRuleConditionCommand = new DelegateCommand(_ => {
+                SelectedSortRule.Conditions.Add(new Condition());
+            });
+
+            // 削除
+            RemoveSortRuleConditionCommand = new DelegateCommand(obj => {
+                if (obj is Condition cond) SelectedSortRule?.Conditions.Remove(cond);
+            });
+
+            // -----------------------------------------------------------------
+            // ルール設定 - ルール一覧
+            // -----------------------------------------------------------------
+            // 新規
+            AddGroupingRuleCommand = new DelegateCommand(_ => {
+                var newRule = new GroupingRule { Name = "新規ルール" };
+                var vm = new GroupingRuleVM(newRule);
+                GroupingRuleList.Add(vm);
+                SelectedGroupingRule = vm;
+            });
+
+            // 削除
+            RemoveGroupingRuleCommand = new DelegateCommand(obj => {
+                if (obj is GroupingRuleVM vm) GroupingRuleList.Remove(vm);
+            });
+
+            // 上
+            MoveUpGroupingRuleCommand = new DelegateCommand(obj => {
+                if (obj is GroupingRuleVM vm) {
+                    var index = GroupingRuleList.IndexOf(vm);
+                    if (index > 0) GroupingRuleList.Move(index, index - 1);
+                }
+            });
+
+            // 下
+            MoveDownGroupingRuleCommand = new DelegateCommand(obj => {
+                if (obj is GroupingRuleVM vm) {
+                    var index = GroupingRuleList.IndexOf(vm);
+                    if (index < GroupingRuleList.Count - 1) GroupingRuleList.Move(index, index + 1);
+                }
+            });
+
+            // -----------------------------------------------------------------
+            // ルール設定 - 判定条件
+            // -----------------------------------------------------------------
+            // 条件追加
+            AddGroupingRuleConditionCommand = new DelegateCommand(_ => {
+                SelectedGroupingRule?.Conditions.Add(new Condition());
+            });
+
+            // 条件削除
+            RemoveGroupingRuleConditionCommand = new DelegateCommand(obj => {
+                if (obj is Condition cond) {
+                    SelectedGroupingRule?.Conditions.Remove(cond);
+                }
+            });
+
+            // -----------------------------------------------------------------
+            // 保存・キャンセル
+            // -----------------------------------------------------------------
+            // 保存
+            SaveCommand = new DelegateCommand(_ => {
+                // 全般
+                _model.HotKeyModifier = SelectedModifier;
+                _model.HotKey = SelectedKey;
+                _model.ShowWindowDelay = ShowWindowDelay;
+                _model.ClearSearchOnWindowSelect = ClearSearchOnWindowSelect;
+                _model.ThumbnailWidth = ThumbnailWidth;
+                _model.ThumbnailHeight = ThumbnailHeight;
+
+                // グループとルール
+                _model.GroupList = GroupList.Select(x => x.Pack()).ToList();
+                _model.GroupingRuleList = GroupingRuleList.Select(x => x.Pack()).ToList();
+                
+                SettingsService.Save(_model);
+                WindowService.Instance.Close(this, true);
+            });
+
+            // キャンセル
+            CancelCommand = new DelegateCommand(_ => {
+                WindowService.Instance.Close(this, false);
+            });
+        }
+    }
+}
+
+---END-FILE---:src/ViewModel/Settings/SettingsDataVM.cs
+---BEGIN-FILE---:src/ViewModel/Settings/SortRuleVM.cs
+using System.Collections.ObjectModel;
+using System.Linq;
+using WindowSorter.Core;
+using WindowSorter.Model.Grouping;
+
+namespace WindowSorter.ViewModel.Settings {
+    /// <summary>
+    /// 並び替えルールの設定用ViewModel
+    /// </summary>
+    public class SortRuleVM : NotificationObject {
+        private readonly SortRule _model;
+
+        public string Name {
+            get => _model.Name;
+            set { _model.Name = value; RaisePropertyChanged(); }
+        }
+
+        public EvalType EvalType {
+            get => _model.EvalType;
+            set { _model.EvalType = value; RaisePropertyChanged(); }
+        }
+
+        /// <summary>
+        /// 条件一覧（画面バインド用）
+        /// </summary>
+        public ObservableCollection<Condition> Conditions { get; }
+
+        public SortRuleVM(SortRule model) {
+            _model = model;
+            Conditions = new ObservableCollection<Condition>(model.Conditions);
+        }
+
+        /// <summary>
+        /// 編集内容をModelに書き戻す
+        /// </summary>
+        public SortRule Pack() {
+            _model.Conditions = Conditions.ToList();
+            return _model;
+        }
+    }
+}
+
+---END-FILE---:src/ViewModel/Settings/SortRuleVM.cs
+---BEGIN-FILE---:src/ViewModel/Settings/WindowGroupVM.cs
+using System;
+using System.Collections.ObjectModel;
+using System.Linq;
+using WindowSorter.Core;
+using WindowSorter.Model.Grouping;
+
+namespace WindowSorter.ViewModel.Settings {
+    /// <summary>
+    /// ウィンドウグループの設定用ViewModel
+    /// </summary>
+    public class WindowGroupVM : NotificationObject {
+        private readonly WindowGroup _model;
+
+        public string Name {
+            get => _model.Name;
+            set { _model.Name = value; RaisePropertyChanged(); }
+        }
+
+        public string ID => _model.ID;
+
+        /// <summary>
+        /// ソートルール一覧（VMでラップして保持）
+        /// </summary>
+        public ObservableCollection<SortRuleVM> SortRules { get; }
+
+        public WindowGroupVM(WindowGroup model) {
+            _model = model;
+            SortRules = new ObservableCollection<SortRuleVM>(
+                model.SortRules.Select(x => new SortRuleVM(x)));
+        }
+
+        /// <summary>
+        /// 編集内容をModelに書き戻す
+        /// </summary>
+        public WindowGroup Pack() {
+            _model.SortRules = SortRules.Select(x => x.Pack()).ToList();
+            return _model;
+        }
+    }
+}
+
+---END-FILE---:src/ViewModel/Settings/WindowGroupVM.cs
+---BEGIN-FILE---:src/ViewModel/WindowGroupVM.cs
+using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.ComponentModel;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using System.Windows.Data;
+using WindowSorter.Core;
+using WindowSorter.Model.Grouping;
+
+namespace WindowSorter.ViewModel {
+    public class WindowGroupVM : NotificationObject {
+        public string Name { get; set; }
+
+        // 開閉状態
+        private bool _isExpanded = true;
+        public bool IsExpanded {
+            get => _isExpanded;
+            set => SetProperty(ref _isExpanded, value);
+        }
+
+        // ウィンドウの一覧
+        private ObservableCollection<WindowInformationVM> _windowList;
+        public ObservableCollection<WindowInformationVM> WindowList {
+            get {
+                return _windowList;
+            }
+            set {
+                if (_windowList != value) {
+                    SetProperty(ref this._windowList, value);
+                    
+                    _windowListView = CollectionViewSource.GetDefaultView(_windowList);
+                    _windowListView.Filter = FilterWindow;
+                    RaisePropertyChanged(nameof(WindowListView));
+                }
+            }
+        }
+
+        // ウィンドウの一覧 CollectionView
+        private ICollectionView _windowListView;
+        public ICollectionView WindowListView {
+            get {
+                if (_windowListView == null && _windowList != null) {
+                    _windowListView = CollectionViewSource.GetDefaultView(_windowList);
+                    _windowListView.Filter = FilterWindow;
+                }
+                return _windowListView;
+            }
+        }
+
+        // 検索文字列
+        private string _searchText = string.Empty;
+        public string SearchText {
+            get => _searchText;
+            set {
+                if (SetProperty(ref _searchText, value)) {
+                    WindowListView?.Refresh();
+                    
+                    RaisePropertyChanged(nameof(HasVisibleWindows));
+                }
+            }
+        }
+
+        // 表示対象のウィンドウが1つでもあるか
+        public bool HasVisibleWindows {
+            get {
+                // if (string.IsNullOrWhiteSpace(SearchText)) return true;
+                return WindowListView?.Cast<object>().Any() ?? false;
+            }
+        }
+
+        // ウィンドウ検索
+        private bool FilterWindow(object item) {
+            if (item is WindowInformationVM window) {
+                if (string.IsNullOrWhiteSpace(SearchText)) return true;
+
+                return IsMatch(window.WindowTitle, SearchText) ||
+                       IsMatch(window.ProcessName, SearchText);
+            }
+            return false;
+        }
+
+        // 検索本体
+        // とりあえずFuzzy Search
+        private static bool IsMatch(string source, string query) {
+            if (string.IsNullOrEmpty(query)) return true;
+            if (string.IsNullOrEmpty(source)) return false;
+
+            int sourceIdx = 0;
+            int queryIdx = 0;
+
+            while (sourceIdx < source.Length && queryIdx < query.Length) {
+                if (char.ToLowerInvariant(source[sourceIdx]) == char.ToLowerInvariant(query[queryIdx])) {
+                    queryIdx++;
+                }
+                sourceIdx++;
+            }
+
+            return queryIdx == query.Length;
+        }
+
+        public WindowGroupVM(WindowGroup windowGroup, Action onWindowExecuted = null) {
+            this.Name = windowGroup.Name;
+
+            this.WindowList = new ObservableCollection<WindowInformationVM>(windowGroup.Windows.Select(x => new WindowInformationVM(x, onWindowExecuted)));
+        }
+    }
+}
+
+---END-FILE---:src/ViewModel/WindowGroupVM.cs
+---BEGIN-FILE---:src/ViewModel/WindowInformationVM.cs
+using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using WindowSorter.Core;
+using WindowSorter.Model.Grouping;
+
+namespace WindowSorter.ViewModel {
+    public class WindowInformationVM : NotificationObject {
+        private WindowInformation _windowInformation;
+        public WindowInformation WindowInformation { get { return _windowInformation; } }
+
+        public string WindowTitle => _windowInformation.WindowTitle;
+        public string ProcessName => _windowInformation.ProcessName;
+        public IntPtr Handle => _windowInformation.Handle;
+
+        private bool _isSelected;
+        public bool IsSelected {
+            get => _isSelected;
+            set => SetProperty(ref _isSelected, value);
+        }
+
+        // 最前面に表示
+        public DelegateCommand TopMostCommand { get; }
+
+        private readonly Action _onTopMostCommandExecuted;
+
+        public WindowInformationVM(WindowInformation windowInformation, Action onTopMostCommandExecuted = null) {
+            _windowInformation = windowInformation;
+            _onTopMostCommandExecuted = onTopMostCommandExecuted;
+
+            this.TopMostCommand = new DelegateCommand((e) => {
+                _windowInformation.BringWindowToTop();
+                _onTopMostCommandExecuted?.Invoke();
+            });
+        }
+    }
+}
+
+---END-FILE---:src/ViewModel/WindowInformationVM.cs
+---BEGIN-FILE---:src/WindowSorter.csproj
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows7.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+	<UseWindowsForms>true</UseWindowsForms>
+	<Company></Company>
+	<AssemblyVersion>0.0.0.0</AssemblyVersion>
+	<FileVersion>0.0.0.0</FileVersion>
+	<ApplicationIcon>icon\icon.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="icon\icon.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="settings.json">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>
+
+---END-FILE---:src/WindowSorter.csproj
+---BEGIN-FILE---:src/WindowSorter.sln
+
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.14.37111.16 d17.14
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WindowSorter", "WindowSorter.csproj", "{AA400E04-D0C7-451B-897B-F69B6DE77CA5}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{AA400E04-D0C7-451B-897B-F69B6DE77CA5}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{AA400E04-D0C7-451B-897B-F69B6DE77CA5}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{AA400E04-D0C7-451B-897B-F69B6DE77CA5}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{AA400E04-D0C7-451B-897B-F69B6DE77CA5}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {A8E25B42-7957-421F-8FCC-EF552FD37466}
+	EndGlobalSection
+EndGlobal
+
+---END-FILE---:src/WindowSorter.sln
+---BEGIN-FILE---:src/icon/icon.svg
+<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background -->
+  <rect width="256" height="256" rx="20" fill="#DDD"/>
+  
+  <!-- Grid (Padding & Gap: 24px, Window Size: 92px) -->
+  <!-- Top-Left: Active (Blue) -->
+  <rect x="24" y="24" width="92" height="92" rx="12" fill="#007AFF"/>
+  
+  <!-- Top-Right: Other 1 -->
+  <rect x="140" y="24" width="92" height="92" rx="12" fill="#b1b1b1"/>
+  
+  <!-- Bottom-Left: Other 2 -->
+  <rect x="24" y="140" width="92" height="92" rx="12" fill="#b1b1b1" fill-opacity="1.0"/>
+  
+  <!-- Bottom-Right: Other 3 -->
+  <rect x="140" y="140" width="92" height="92" rx="12" fill="#b1b1b1" fill-opacity="1.0"/>
+  
+  <!-- Detail lines in active window -->
+  <!-- <rect x="36" y="44" width="68" height="10" rx="5" fill="white" fill-opacity="1.0"/> -->
+  <!-- <rect x="36" y="64" width="44" height="10" rx="5" fill="white" fill-opacity="0.7"/> -->
+</svg>
+
+---END-FILE---:src/icon/icon.svg
+---BEGIN-FILE---:src/icon/index.html
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <title>SVG to ICO Converter</title>
+    <style>
+        body {
+            margin: 20px;
+            line-height: 1.6;
+        }
+
+        textarea {
+            width: 100%;
+            height: 200px;
+            margin-bottom: 10px;
+        }
+
+        .controls {
+            margin-bottom: 20px;
+        }
+
+        button {
+            padding: 10px 15px;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+
+        canvas {
+            width: 32px;
+            height: 32px;
+        }
+
+        .preview-label {
+            margin-bottom: 5px;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>SVG to ICO Converter</h1>
+
+    <label>SVG Code:</label>
+    <textarea id="svgInput"></textarea>
+
+    <div class="controls">
+        <button id="drawBtn">Canvasへ描画</button>
+        <button id="exportBtn">icoファイル書き出し</button>
+    </div>
+
+    <div class="preview-label">Preview (256x256):</div>
+    <canvas
+        id="canvas"
+        width="256"
+        height="256"
+    ></canvas>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const svgInput = document.getElementById('svgInput');
+
+        // SVGをCanvasに描画する
+        function drawToCanvas() {
+            return new Promise((resolve, reject) => {
+                const svgData = svgInput.value;
+                const blob = new Blob([svgData], {type: 'image/svg+xml;charset=utf-8'});
+                const url = URL.createObjectURL(blob);
+                const img = new Image();
+
+                img.onload = () => {
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    ctx.drawImage(img, 0, 0, 256, 256);
+                    URL.revokeObjectURL(url);
+                    resolve();
+                };
+                img.onerror = reject;
+                img.src = url;
+            });
+        }
+
+        document.getElementById('drawBtn').onclick = drawToCanvas;
+
+        document.getElementById('exportBtn').onclick = async () => {
+            await drawToCanvas();
+
+            // CanvasからPNGデータを取得
+            canvas.toBlob(async (pngBlob) => {
+                const pngBuffer = await pngBlob.arrayBuffer();
+                const pngData = new Uint8Array(pngBuffer);
+
+                // ICO ヘッダー (22 bytes)
+                const header = new Uint8Array(22);
+                header.set([
+                    0x00, 0x00,             // Reserved
+                    0x01, 0x00,             // Type (Icon)
+                    0x01, 0x00,             // Count (1 image)
+                    0x00,                   // Width (0=256)
+                    0x00,                   // Height (0=256)
+                    0x00,                   // Color count
+                    0x00,                   // Reserved
+                    0x01, 0x00,             // Planes
+                    0x20, 0x00              // BPP (32 bit)
+                ]);
+
+                // PNGサイズをリトルエンディアンでセット
+                const size = pngData.length;
+                header[14] = size & 0xFF;
+                header[15] = (size >> 8) & 0xFF;
+                header[16] = (size >> 16) & 0xFF;
+                header[17] = (size >> 24) & 0xFF;
+
+                // データ開始位置 (Offset: 22 bytes)
+                header[18] = 22; 
+                header[19] = 0;
+                header[20] = 0;
+                header[21] = 0;
+
+                // 保存
+                const icoBlob = new Blob([header, pngData], {type: 'image/x-icon'});
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(icoBlob);
+                a.download = 'icon.ico';
+                a.click();
+            }, 'image/png');
+        };
+
+        // 初期描画
+        drawToCanvas();
+    </script>
+</body>
+
+</html>
+---END-FILE---:src/icon/index.html

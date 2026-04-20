@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <title>SVG to ICO Converter</title>
+    <style>
+        body {
+            margin: 20px;
+            line-height: 1.6;
+        }
+
+        textarea {
+            width: 100%;
+            height: 200px;
+            margin-bottom: 10px;
+        }
+
+        .controls {
+            margin-bottom: 20px;
+        }
+
+        button {
+            padding: 10px 15px;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+
+        canvas {
+            width: 32px;
+            height: 32px;
+        }
+
+        .preview-label {
+            margin-bottom: 5px;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>SVG to ICO Converter</h1>
+
+    <label>SVG Code:</label>
+    <textarea id="svgInput"></textarea>
+
+    <div class="controls">
+        <button id="drawBtn">Canvasへ描画</button>
+        <button id="exportBtn">icoファイル書き出し</button>
+    </div>
+
+    <div class="preview-label">Preview (256x256):</div>
+    <canvas
+        id="canvas"
+        width="256"
+        height="256"
+    ></canvas>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const svgInput = document.getElementById('svgInput');
+
+        // SVGをCanvasに描画する
+        function drawToCanvas() {
+            return new Promise((resolve, reject) => {
+                const svgData = svgInput.value;
+                const blob = new Blob([svgData], {type: 'image/svg+xml;charset=utf-8'});
+                const url = URL.createObjectURL(blob);
+                const img = new Image();
+
+                img.onload = () => {
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    ctx.drawImage(img, 0, 0, 256, 256);
+                    URL.revokeObjectURL(url);
+                    resolve();
+                };
+                img.onerror = reject;
+                img.src = url;
+            });
+        }
+
+        document.getElementById('drawBtn').onclick = drawToCanvas;
+
+        document.getElementById('exportBtn').onclick = async () => {
+            await drawToCanvas();
+
+            // CanvasからPNGデータを取得
+            canvas.toBlob(async (pngBlob) => {
+                const pngBuffer = await pngBlob.arrayBuffer();
+                const pngData = new Uint8Array(pngBuffer);
+
+                // ICO ヘッダー (22 bytes)
+                const header = new Uint8Array(22);
+                header.set([
+                    0x00, 0x00,             // Reserved
+                    0x01, 0x00,             // Type (Icon)
+                    0x01, 0x00,             // Count (1 image)
+                    0x00,                   // Width (0=256)
+                    0x00,                   // Height (0=256)
+                    0x00,                   // Color count
+                    0x00,                   // Reserved
+                    0x01, 0x00,             // Planes
+                    0x20, 0x00              // BPP (32 bit)
+                ]);
+
+                // PNGサイズをリトルエンディアンでセット
+                const size = pngData.length;
+                header[14] = size & 0xFF;
+                header[15] = (size >> 8) & 0xFF;
+                header[16] = (size >> 16) & 0xFF;
+                header[17] = (size >> 24) & 0xFF;
+
+                // データ開始位置 (Offset: 22 bytes)
+                header[18] = 22; 
+                header[19] = 0;
+                header[20] = 0;
+                header[21] = 0;
+
+                // 保存
+                const icoBlob = new Blob([header, pngData], {type: 'image/x-icon'});
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(icoBlob);
+                a.download = 'icon.ico';
+                a.click();
+            }, 'image/png');
+        };
+
+        // 初期描画
+        drawToCanvas();
+    </script>
+</body>
+
+</html>
