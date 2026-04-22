@@ -16,8 +16,9 @@ namespace WindowSorter.Model.Grouping {
         /// <summary>
         /// ウィンドウを列挙して返す
         /// </summary>
+        /// <param name="ignoreList">除外条件リスト</param>
         /// <returns></returns>
-        public static List<WindowInformation> GetWindows() {
+        public static List<WindowInformation> GetWindows(List<Condition> ignoreList = null) {
             // 戻り値
             List<WindowInformation> windowList = new();
 
@@ -85,12 +86,19 @@ namespace WindowSorter.Model.Grouping {
                         _processNameCache.Add(processID, processName);
                     }
 
-                    windowList.Add(new WindowInformation() {
+                    var window = new WindowInformation() {
                         WindowTitle = windowTitle.ToString(),
                         WindowClassName = className.ToString(),
                         Handle = hWnd,
                         ProcessName = processName
-                    });
+                    };
+
+                    // 除外条件に一致するかチェック
+                    if (ignoreList != null && ignoreList.Any(c => c.Match(window))) {
+                        return true;
+                    }
+
+                    windowList.Add(window);
 
                     return true;
                 }),

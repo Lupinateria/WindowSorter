@@ -23,6 +23,9 @@ namespace WindowSorter.ViewModel.Settings {
         /// <summary>振り分けルール</summary>
         public ObservableCollection<GroupingRuleVM> GroupingRuleList { get; }
 
+        /// <summary>除外リスト</summary>
+        public ObservableCollection<Condition> IgnoreList { get; }
+
         // -----------------------------------------------------------------
         // ホットキー設定
         // -----------------------------------------------------------------
@@ -195,6 +198,11 @@ namespace WindowSorter.ViewModel.Settings {
 
         public DelegateCommand AddGroupingRuleConditionCommand { get; }
         public DelegateCommand RemoveGroupingRuleConditionCommand { get; }
+
+        // 除外設定
+        public DelegateCommand AddIgnoreConditionCommand { get; }
+        public DelegateCommand RemoveIgnoreConditionCommand { get; }
+
         public DelegateCommand ClearHotKeyCommand { get; }
         public DelegateCommand SaveCommand { get; }
         public DelegateCommand CancelCommand { get; }
@@ -221,6 +229,9 @@ namespace WindowSorter.ViewModel.Settings {
 
             GroupingRuleList = new ObservableCollection<GroupingRuleVM>(
                 _model.GroupingRuleList.Select(x => new GroupingRuleVM(x)));
+
+            // 除外設定のViewModel
+            IgnoreList = new ObservableCollection<Condition>(_model.IgnoreList);
 
             // デフォルト選択
             SelectedGroup = GroupList.FirstOrDefault();
@@ -363,6 +374,17 @@ namespace WindowSorter.ViewModel.Settings {
             });
 
             // -----------------------------------------------------------------
+            // 除外設定
+            // -----------------------------------------------------------------
+            AddIgnoreConditionCommand = new DelegateCommand(_ => {
+                IgnoreList.Add(new Condition());
+            });
+
+            RemoveIgnoreConditionCommand = new DelegateCommand(obj => {
+                if (obj is Condition cond) IgnoreList.Remove(cond);
+            });
+
+            // -----------------------------------------------------------------
             // 保存・キャンセル
             // -----------------------------------------------------------------
             // 保存
@@ -376,10 +398,11 @@ namespace WindowSorter.ViewModel.Settings {
                 _model.ThumbnailHeight = ThumbnailHeight;
                 _model.SearchMethod = SearchMethod;
 
-                // グループとルール
+                // グループとルールと除外リスト
                 _model.GroupList = GroupList.Select(x => x.Pack()).ToList();
                 _model.GroupingRuleList = GroupingRuleList.Select(x => x.Pack()).ToList();
-                
+                _model.IgnoreList = IgnoreList.ToList();
+
                 SettingsService.Save(_model);
                 WindowService.Instance.Close(this, true);
             });

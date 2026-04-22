@@ -82,7 +82,7 @@
 
             <!-- 選択中のウィンドウタイトル表示ボックス -->
             <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="20,0,0,0">
-                <TextBlock Text="選択中: " Foreground="#CCC" FontSize="12" VerticalAlignment="Center" Margin="0,0,10,0" />
+                <!-- <TextBlock Text="選択中: " Foreground="#CCC" FontSize="12" VerticalAlignment="Center" Margin="0,0,10,0" /> -->
                 <TextBlock Text="{Binding SelectedWindow.WindowTitle}" 
                                Foreground="#EFEFEF" 
                                FontSize="16" 

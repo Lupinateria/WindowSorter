@@ -19,6 +19,7 @@ namespace WindowSorter.Model {
     public class SettingsData {
         public List<WindowGroup> GroupList { get; set; } = new List<WindowGroup>();
         public List<GroupingRule> GroupingRuleList { get; set; } = new List<GroupingRule>();
+        public List<Condition> IgnoreList { get; set; } = new List<Condition>();
         public ModifierKeys HotKeyModifier { get; set; } = ModifierKeys.Alt;
         public Key HotKey { get; set; } = Key.Q;
         public uint ShowWindowDelay { get; set; } = 10;

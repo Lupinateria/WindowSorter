@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
@@ -135,10 +135,10 @@ namespace WindowSorter.ViewModel {
             var currentStates = _windowGroupList?.ToDictionary(g => g.Name, g => g.IsExpanded);
 
             List<WindowGroup> groups = WindowGroupingEngine.GetWindowGroupList(
-                SettingsService.Current.GroupingRuleList,
-                SettingsService.Current.GroupList
+                SettingsService.Current.GroupingRuleList, 
+                SettingsService.Current.GroupList,
+                SettingsService.Current.IgnoreList
             );
-
             var newGroups = groups.Select(x => {
                 var vm = new WindowGroupVM(x, () => {
                     if (SettingsService.Current.ClearSearchOnWindowSelect) {

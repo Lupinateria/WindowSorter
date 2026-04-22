@@ -14,9 +14,9 @@ namespace WindowSorter.Model.Grouping {
         /// <summary>
         /// 表示中のウィンドウを分類して返す
         /// </summary>
-        public static List<WindowGroup> GetWindowGroupList(IEnumerable<GroupingRule> rules, IEnumerable<WindowGroup> groups) {
+        public static List<WindowGroup> GetWindowGroupList(IEnumerable<GroupingRule> rules, IEnumerable<WindowGroup> groups, List<Condition> ignoreList = null) {
             // ウィンドウを列挙
-            List<WindowInformation> windows = WindowEnumerator.GetWindows();
+            List<WindowInformation> windows = WindowEnumerator.GetWindows(ignoreList);
 
             // 定義済みのグループからグループ生成
             Dictionary<string, WindowGroup> groupMap = groups.ToDictionary(

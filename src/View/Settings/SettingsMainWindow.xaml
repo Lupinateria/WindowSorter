@@ -55,6 +55,7 @@
                 <ListBoxItem x:Name="MenuGeneral" Content="全般" Padding="10,8" />
                 <ListBoxItem x:Name="MenuGroup" Content="グループ設定" Padding="10,8" />
                 <ListBoxItem x:Name="MenuRule" Content="ルール設定" Padding="10,8" />
+                <ListBoxItem x:Name="MenuIgnore" Content="除外設定" Padding="10,8" />
             </ListBox>
         </Border>
 
@@ -205,8 +206,8 @@
 
                                 <TextBlock Text="評価方法:" VerticalAlignment="Center" Margin="0,0,10,0" />
                                 <ComboBox Width="150" SelectedValue="{Binding SelectedSortRule.EvalType}" SelectedValuePath="Tag">
-                                    <ComboBoxItem Content="AND (全て一致)" Tag="{x:Static model_group:EvalType.AND}" />
-                                    <ComboBoxItem Content="OR (いずれか一致)" Tag="{x:Static model_group:EvalType.OR}" />
+                                    <ComboBoxItem Content="AND" Tag="{x:Static model_group:EvalType.AND}" />
+                                    <ComboBoxItem Content="OR" Tag="{x:Static model_group:EvalType.OR}" />
                                 </ComboBox>
                             </StackPanel>
 
@@ -218,23 +219,23 @@
                                                 <ColumnDefinition Width="Auto" />
                                                 <ColumnDefinition Width="Auto" />
                                                 <ColumnDefinition Width="Auto" />
-                                                <ColumnDefinition Width="Auto" />
                                                 <ColumnDefinition Width="*" />
                                                 <ColumnDefinition Width="Auto" />
                                             </Grid.ColumnDefinitions>
-                                            <TextBlock Text="対象:" VerticalAlignment="Center" Margin="0,0,5,0" />
-                                            <ComboBox Grid.Column="1" Width="100" Margin="0,0,10,0" 
+                                            <ComboBox Grid.Column="0" Width="100" Margin="0,0,10,0" 
                                                 ItemsSource="{Binding Source={StaticResource TargetEnumValues}}"
                                                 SelectedItem="{Binding Target}" />
 
-                                            <TextBlock Grid.Column="2" Text="方法:" VerticalAlignment="Center" Margin="0,0,5,0" />
-                                            <ComboBox Grid.Column="3" Width="100" Margin="0,0,10,0" 
+                                            <ComboBox Grid.Column="1" Width="100" Margin="0,0,10,0" 
                                                 ItemsSource="{Binding Source={StaticResource OperatorEnumValues}}"
                                                 SelectedItem="{Binding Operator}" />
 
-                                            <TextBox Grid.Column="4" Text="{Binding Value, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,10,0" Padding="2" />
+                                            <CheckBox Grid.Column="2" Content="否定" VerticalAlignment="Center" Margin="0,0,10,0" 
+                                                IsChecked="{Binding IsNegative}" />
 
-                                            <Button Grid.Column="5" Content="削除" Width="40" 
+                                            <TextBox Grid.Column="3" Text="{Binding Value, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,10,0" Padding="2" />
+
+                                            <Button Grid.Column="4" Content="削除" Width="40" 
                                                 Command="{Binding DataContext.RemoveSortRuleConditionCommand, RelativeSource={RelativeSource AncestorType=Window}}" 
                                                 CommandParameter="{Binding}" />
                                         </Grid>
@@ -312,8 +313,8 @@
                     <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,10">
                         <TextBlock Text="評価方法:" VerticalAlignment="Center" Margin="0,0,10,0" />
                         <ComboBox Width="150" SelectedValue="{Binding SelectedGroupingRule.EvalType}" SelectedValuePath="Tag">
-                            <ComboBoxItem Content="AND (全て一致)" Tag="{x:Static model_group:EvalType.AND}" />
-                            <ComboBoxItem Content="OR (いずれか一致)" Tag="{x:Static model_group:EvalType.OR}" />
+                            <ComboBoxItem Content="AND" Tag="{x:Static model_group:EvalType.AND}" />
+                            <ComboBoxItem Content="OR" Tag="{x:Static model_group:EvalType.OR}" />
                         </ComboBox>
                     </StackPanel>
 
@@ -331,23 +332,23 @@
                                                 <ColumnDefinition Width="Auto" />
                                                 <ColumnDefinition Width="Auto" />
                                                 <ColumnDefinition Width="Auto" />
-                                                <ColumnDefinition Width="Auto" />
                                                 <ColumnDefinition Width="*" />
                                                 <ColumnDefinition Width="Auto" />
                                             </Grid.ColumnDefinitions>
-                                            <TextBlock Text="対象:" VerticalAlignment="Center" Margin="0,0,5,0" />
-                                            <ComboBox Grid.Column="1" Width="100" Margin="0,0,10,0" 
+                                            <ComboBox Grid.Column="0" Width="100" Margin="0,0,10,0" 
                                                       ItemsSource="{Binding Source={StaticResource TargetEnumValues}}"
                                                       SelectedItem="{Binding Target}" />
 
-                                            <TextBlock Grid.Column="2" Text="方法:" VerticalAlignment="Center" Margin="0,0,5,0" />
-                                            <ComboBox Grid.Column="3" Width="100" Margin="0,0,10,0" 
+                                            <ComboBox Grid.Column="1" Width="100" Margin="0,0,10,0" 
                                                       ItemsSource="{Binding Source={StaticResource OperatorEnumValues}}"
                                                       SelectedItem="{Binding Operator}" />
 
-                                            <TextBox Grid.Column="4" Text="{Binding Value, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,10,0" Padding="2" />
+                                            <CheckBox Grid.Column="2" Content="否定" VerticalAlignment="Center" Margin="0,0,10,0" 
+                                                IsChecked="{Binding IsNegative}" />
 
-                                            <Button Grid.Column="5" Content="削除" Width="40" 
+                                            <TextBox Grid.Column="3" Text="{Binding Value, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,10,0" Padding="2" />
+
+                                            <Button Grid.Column="4" Content="削除" Width="40" 
                                                     Command="{Binding DataContext.RemoveGroupingRuleConditionCommand, RelativeSource={RelativeSource AncestorType=Window}}" 
                                                     CommandParameter="{Binding}" />
                                         </Grid>
@@ -360,6 +361,54 @@
                         </Grid>
                     </GroupBox>
                 </Grid>
+            </Grid>
+
+            <!-- ******************************************************************** -->
+            <!-- 除外設定ビュー -->
+            <!-- ******************************************************************** -->
+            <Grid x:Name="IgnoreSettingsView" Visibility="{Binding IsSelected, ElementName=MenuIgnore, Converter={StaticResource BooleanToVisibilityConverter}, FallbackValue=Collapsed}">
+                <GroupBox Header="除外条件の設定 (ORで評価します)">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <ListBox Margin="5" ItemsSource="{Binding IgnoreList}" HorizontalContentAlignment="Stretch">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Margin="0,2">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <ComboBox Grid.Column="0" Width="100" Margin="0,0,10,0" 
+                                                  ItemsSource="{Binding Source={StaticResource TargetEnumValues}}"
+                                                  SelectedItem="{Binding Target}" />
+
+                                        <ComboBox Grid.Column="1" Width="100" Margin="0,0,10,0" 
+                                                  ItemsSource="{Binding Source={StaticResource OperatorEnumValues}}"
+                                                  SelectedItem="{Binding Operator}" />
+
+                                        <CheckBox Grid.Column="2" Content="否定" VerticalAlignment="Center" Margin="0,0,10,0" 
+                                                  IsChecked="{Binding IsNegative}" />
+
+                                        <TextBox Grid.Column="3" Text="{Binding Value, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,10,0" Padding="2" />
+
+                                        <Button Grid.Column="4" Content="削除" Width="40" 
+                                                Command="{Binding DataContext.RemoveIgnoreConditionCommand, RelativeSource={RelativeSource AncestorType=Window}}" 
+                                                CommandParameter="{Binding}" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                        <StackPanel Grid.Column="1" Margin="5">
+                            <Button Content="追加" Command="{Binding AddIgnoreConditionCommand}" Width="60" Margin="0,0,0,5" />
+                        </StackPanel>
+                    </Grid>
+                </GroupBox>
             </Grid>
         </Grid>
 

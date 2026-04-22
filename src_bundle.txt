@@ -534,31 +534,24 @@ namespace WindowSorter.Model.Grouping {
         Contains,
         StartWith,
         EndWith,
+        Regex,
     }
 
-    /// <summary>
-    /// 条件式
-    /// </summary>
+    // 条件式
     public class Condition {
-        /// <summary>
-        /// 比較対象
-        /// </summary>
+        // 比較対象
         public Target Target { get; set; }  = Target.WindowTitle;
         
-        /// <summary>
-        /// 比較方法
-        /// </summary>
+        // 比較方法
         public Operator Operator { get; set; } = Operator.Contains;
         
-        /// <summary>
-        /// 語句
-        /// </summary>
+        // 語句
         public string Value { get; set; } = "";
+
+        // 否定フラグ
+        public bool IsNegative { get; set; } = false;
         
-        /// <summary>
-        /// この条件式を評価する
-        /// </summary>
-        /// <returns></returns>
+        // この条件式を評価する
         public bool Match(WindowInformation window) {
             string targetValue = Target switch {
                 Target.WindowTitle => window.WindowTitle ?? string.Empty,
@@ -568,12 +561,23 @@ namespace WindowSorter.Model.Grouping {
 
             if (string.IsNullOrEmpty(Value)) return true;
 
-            return Operator switch {
+            bool result = Operator switch {
                 Operator.Contains => targetValue.Contains(Value, StringComparison.OrdinalIgnoreCase),
                 Operator.StartWith => targetValue.StartsWith(Value, StringComparison.OrdinalIgnoreCase),
                 Operator.EndWith => targetValue.EndsWith(Value, StringComparison.OrdinalIgnoreCase),
+                Operator.Regex => IsRegexMatch(targetValue, Value),
                 _ => false
             };
+
+            return IsNegative ? !result : result;
+        }
+
+        private bool IsRegexMatch(string input, string pattern) {
+            try {
+                return System.Text.RegularExpressions.Regex.IsMatch(input, pattern, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            } catch (ArgumentException) {
+                return false;
+            }
         }
     }
 }
@@ -683,8 +687,9 @@ namespace WindowSorter.Model.Grouping {
         /// <summary>
         /// ウィンドウを列挙して返す
         /// </summary>
+        /// <param name="ignoreList">除外条件リスト</param>
         /// <returns></returns>
-        public static List<WindowInformation> GetWindows() {
+        public static List<WindowInformation> GetWindows(List<Condition> ignoreList = null) {
             // 戻り値
             List<WindowInformation> windowList = new();
 
@@ -752,12 +757,19 @@ namespace WindowSorter.Model.Grouping {
                         _processNameCache.Add(processID, processName);
                     }
 
-                    windowList.Add(new WindowInformation() {
+                    var window = new WindowInformation() {
                         WindowTitle = windowTitle.ToString(),
                         WindowClassName = className.ToString(),
                         Handle = hWnd,
                         ProcessName = processName
-                    });
+                    };
+
+                    // 除外条件に一致するかチェック
+                    if (ignoreList != null && ignoreList.Any(c => c.Match(window))) {
+                        return true;
+                    }
+
+                    windowList.Add(window);
 
                     return true;
                 }),
@@ -822,9 +834,9 @@ namespace WindowSorter.Model.Grouping {
         /// <summary>
         /// 表示中のウィンドウを分類して返す
         /// </summary>
-        public static List<WindowGroup> GetWindowGroupList(IEnumerable<GroupingRule> rules, IEnumerable<WindowGroup> groups) {
+        public static List<WindowGroup> GetWindowGroupList(IEnumerable<GroupingRule> rules, IEnumerable<WindowGroup> groups, List<Condition> ignoreList = null) {
             // ウィンドウを列挙
-            List<WindowInformation> windows = WindowEnumerator.GetWindows();
+            List<WindowInformation> windows = WindowEnumerator.GetWindows(ignoreList);
 
             // 定義済みのグループからグループ生成
             Dictionary<string, WindowGroup> groupMap = groups.ToDictionary(
@@ -1005,17 +1017,29 @@ using WindowSorter.Model.Grouping;
 
 namespace WindowSorter.Model {
     /// <summary>
+    /// 検索方法
+    /// </summary>
+    public enum SearchMethod {
+        /// <summary>部分一致</summary>
+        PartialMatch,
+        /// <summary>曖昧検索</summary>
+        FuzzySearch
+    }
+
+    /// <summary>
     /// 設定
     /// </summary>
     public class SettingsData {
         public List<WindowGroup> GroupList { get; set; } = new List<WindowGroup>();
         public List<GroupingRule> GroupingRuleList { get; set; } = new List<GroupingRule>();
+        public List<Condition> IgnoreList { get; set; } = new List<Condition>();
         public ModifierKeys HotKeyModifier { get; set; } = ModifierKeys.Alt;
         public Key HotKey { get; set; } = Key.Q;
         public uint ShowWindowDelay { get; set; } = 10;
         public bool ClearSearchOnWindowSelect { get; set; } = true;
         public double ThumbnailWidth { get; set; } = 284;
         public double ThumbnailHeight { get; set; } = 160;
+        public SearchMethod SearchMethod { get; set; } = SearchMethod.PartialMatch;
         /// <summary>
         /// 現在の設定のクローンインスタンス取得
         /// </summary>
@@ -1101,14 +1125,27 @@ namespace WindowSorter.Model {
 <Window x:Class="WindowSorter.View.AboutWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Height="300" Width="350"
+        Height="250" Width="300"
+        Background="#EEE"
         WindowStartupLocation="CenterOwner" ResizeMode="NoResize" WindowStyle="ToolWindow">
     <Grid Margin="20">
-        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
-            <Image Source="/icon/icon.ico" Width="64" Height="64" Margin="0,0,0,10" HorizontalAlignment="Center"/>
-            <TextBlock x:Name="AppNameText" FontSize="22" FontWeight="Bold" HorizontalAlignment="Center" Margin="0,0,0,5"/>
-            <TextBlock x:Name="VersionText" FontSize="14" HorizontalAlignment="Center" Margin="0,0,0,25" Foreground="#666"/>
-            <Button Content="閉じる" Width="100" Height="30" Click="CloseButton_Click" HorizontalAlignment="Center" IsDefault="True"/>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*"></RowDefinition>
+            <RowDefinition Height="Auto"></RowDefinition>
+        </Grid.RowDefinitions>
+        
+        <StackPanel Grid.Row="0">
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,20">
+                <Image Source="/icon/icon.ico" Width="64" Height="64" Margin="0,0,0,0" HorizontalAlignment="Center"/>
+                <TextBlock x:Name="AppNameText" FontSize="22" FontWeight="Bold" VerticalAlignment="Center" Margin="20,0,0,0"/>
+            </StackPanel>
+
+            <TextBlock x:Name="VersionText" Margin="0,0,0,0"/>
+            <TextBlock Text="Copyright(C) 2026 Lupinateria"/>
+        </StackPanel>
+        
+        <StackPanel Grid.Row="1">
+            <Button Content="OK" Width="100" Height="30" Click="CloseButton_Click" HorizontalAlignment="Right" IsDefault="True"/>
         </StackPanel>
     </Grid>
 </Window>
@@ -1435,7 +1472,7 @@ public class DwmThumbnailView : FrameworkElement {
 
             <!-- 選択中のウィンドウタイトル表示ボックス -->
             <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="20,0,0,0">
-                <TextBlock Text="選択中: " Foreground="#CCC" FontSize="12" VerticalAlignment="Center" Margin="0,0,10,0" />
+                <!-- <TextBlock Text="選択中: " Foreground="#CCC" FontSize="12" VerticalAlignment="Center" Margin="0,0,10,0" /> -->
                 <TextBlock Text="{Binding SelectedWindow.WindowTitle}" 
                                Foreground="#EFEFEF" 
                                FontSize="16" 
@@ -1732,6 +1769,7 @@ namespace WindowSorter {
             if (this.DataContext is MainWindowVM vm) {
                 vm.Refresh();
                 this.UpdateLayout();
+                MainScrollViewer.ScrollToTop();
             }
 
             // サムネイル表示
@@ -1878,8 +1916,9 @@ namespace WindowSorter {
         xmlns:vm="clr-namespace:WindowSorter.ViewModel.Settings"
         xmlns:model_group="clr-namespace:WindowSorter.Model.Grouping"
         mc:Ignorable="d"
-        Title="設定" Height="650" Width="950"
+        Title="設定" Height="750" Width="950"
         WindowStartupLocation="CenterOwner"
+        Background="#EEE"
         d:DataContext="{d:DesignInstance Type=vm:SettingsDataVM}">
 
     <Window.Resources>
@@ -1897,6 +1936,11 @@ namespace WindowSorter {
                 <x:Type TypeName="model_group:Operator" />
             </ObjectDataProvider.MethodParameters>
         </ObjectDataProvider>
+
+        <!-- 全てのGroupBoxに共通の枠線色を適用 -->
+        <Style TargetType="{x:Type GroupBox}">
+            <Setter Property="BorderBrush" Value="#CCC" />
+        </Style>
     </Window.Resources>
     
     <Window.DataContext>
@@ -1914,11 +1958,12 @@ namespace WindowSorter {
         </Grid.RowDefinitions>
 
         <!-- 左側：メニューナビゲーション -->
-        <Border Grid.Column="0" Grid.Row="0" BorderBrush="#CCC" BorderThickness="0,0,1,0" Margin="0,0,10,0">
+        <Border Grid.Column="0" Grid.Row="0" BorderBrush="#AAA" BorderThickness="1,1,1,1" Margin="0,0,10,0" CornerRadius="0"  Background="#FFF">
             <ListBox x:Name="NavigationMenu" BorderThickness="0" Background="Transparent" SelectedIndex="0">
                 <ListBoxItem x:Name="MenuGeneral" Content="全般" Padding="10,8" />
                 <ListBoxItem x:Name="MenuGroup" Content="グループ設定" Padding="10,8" />
                 <ListBoxItem x:Name="MenuRule" Content="ルール設定" Padding="10,8" />
+                <ListBoxItem x:Name="MenuIgnore" Content="除外設定" Padding="10,8" />
             </ListBox>
         </Border>
 
@@ -1953,6 +1998,16 @@ namespace WindowSorter {
 
                             <TextBlock Text="デフォルト: 284x160" VerticalAlignment="Center"  FontSize="11" Margin="10,0,0,0" Foreground="#888" />
                         </StackPanel>
+
+                        <StackPanel Orientation="Horizontal" Margin="0,15,0,0">
+                            <TextBlock Text="検索方法" VerticalAlignment="Center" Width="100" />
+                            <RadioButton Content="部分一致" 
+                                         IsChecked="{Binding IsSearchPartialMatch}" 
+                                         VerticalAlignment="Center" Margin="0,0,20,0" />
+                            <RadioButton Content="あいまい" 
+                                         IsChecked="{Binding IsSearchFuzzy}" 
+                                         VerticalAlignment="Center" />
+                        </StackPanel>
                         
                         <CheckBox Content="ウィンドウ選択後、検索テキストをクリアする" 
                                   IsChecked="{Binding ClearSearchOnWindowSelect}" 
@@ -1981,10 +2036,11 @@ namespace WindowSorter {
             <!-- ******************************************************************** -->
             <Grid x:Name="GroupSettingsView" Visibility="{Binding IsSelected, ElementName=MenuGroup, Converter={StaticResource BooleanToVisibilityConverter}, FallbackValue=Visible}">
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="180" />
                     <!-- グループ一覧 -->
-                    <RowDefinition Height="*" />
+                    <RowDefinition Height="180" />
+                    
                     <!-- 詳細編集エリア -->
+                    <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
 
                 <GroupBox Header="グループ" Margin="0,0,0,10">
@@ -2013,7 +2069,7 @@ namespace WindowSorter {
                         <!-- グループ名 -->
                         <RowDefinition Height="*" />
                         <!-- ソートルール一覧 -->
-                        <RowDefinition Height="150" />
+                        <RowDefinition Height="*" />
                         <!-- 条件設定 -->
                     </Grid.RowDefinitions>
 
@@ -2028,7 +2084,7 @@ namespace WindowSorter {
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
-                            <ListBox x:Name="SortRuleListBox" Margin="5" 
+                            <ListBox x:Name="SortRuleListBox" Margin="5"
                                 ItemsSource="{Binding SelectedGroup.SortRules}" 
                                 SelectedItem="{Binding SelectedSortRule}"
                                 DisplayMemberPath="Name" />
@@ -2054,7 +2110,13 @@ namespace WindowSorter {
 
                             <StackPanel Grid.Row="0" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,5,0,10">
                                 <TextBlock Text="名前:" VerticalAlignment="Center" Margin="0,0,10,0" />
-                                <TextBox Width="300" Text="{Binding SelectedSortRule.Name, UpdateSourceTrigger=PropertyChanged}" Padding="3" />
+                                <TextBox Width="200" Text="{Binding SelectedSortRule.Name, UpdateSourceTrigger=PropertyChanged}" Padding="3" Margin="0,0,20,0" />
+
+                                <TextBlock Text="評価方法:" VerticalAlignment="Center" Margin="0,0,10,0" />
+                                <ComboBox Width="150" SelectedValue="{Binding SelectedSortRule.EvalType}" SelectedValuePath="Tag">
+                                    <ComboBoxItem Content="AND" Tag="{x:Static model_group:EvalType.AND}" />
+                                    <ComboBoxItem Content="OR" Tag="{x:Static model_group:EvalType.OR}" />
+                                </ComboBox>
                             </StackPanel>
 
                             <ListBox Grid.Row="1" Grid.Column="0" Margin="5" ItemsSource="{Binding SelectedSortRule.Conditions}" HorizontalContentAlignment="Stretch">
@@ -2065,23 +2127,23 @@ namespace WindowSorter {
                                                 <ColumnDefinition Width="Auto" />
                                                 <ColumnDefinition Width="Auto" />
                                                 <ColumnDefinition Width="Auto" />
-                                                <ColumnDefinition Width="Auto" />
                                                 <ColumnDefinition Width="*" />
                                                 <ColumnDefinition Width="Auto" />
                                             </Grid.ColumnDefinitions>
-                                            <TextBlock Text="対象:" VerticalAlignment="Center" Margin="0,0,5,0" />
-                                            <ComboBox Grid.Column="1" Width="100" Margin="0,0,10,0" 
+                                            <ComboBox Grid.Column="0" Width="100" Margin="0,0,10,0" 
                                                 ItemsSource="{Binding Source={StaticResource TargetEnumValues}}"
                                                 SelectedItem="{Binding Target}" />
 
-                                            <TextBlock Grid.Column="2" Text="方法:" VerticalAlignment="Center" Margin="0,0,5,0" />
-                                            <ComboBox Grid.Column="3" Width="100" Margin="0,0,10,0" 
+                                            <ComboBox Grid.Column="1" Width="100" Margin="0,0,10,0" 
                                                 ItemsSource="{Binding Source={StaticResource OperatorEnumValues}}"
                                                 SelectedItem="{Binding Operator}" />
 
-                                            <TextBox Grid.Column="4" Text="{Binding Value, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,10,0" Padding="2" />
+                                            <CheckBox Grid.Column="2" Content="否定" VerticalAlignment="Center" Margin="0,0,10,0" 
+                                                IsChecked="{Binding IsNegative}" />
 
-                                            <Button Grid.Column="5" Content="削除" Width="40" 
+                                            <TextBox Grid.Column="3" Text="{Binding Value, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,10,0" Padding="2" />
+
+                                            <Button Grid.Column="4" Content="削除" Width="40" 
                                                 Command="{Binding DataContext.RemoveSortRuleConditionCommand, RelativeSource={RelativeSource AncestorType=Window}}" 
                                                 CommandParameter="{Binding}" />
                                         </Grid>
@@ -2159,8 +2221,8 @@ namespace WindowSorter {
                     <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,10">
                         <TextBlock Text="評価方法:" VerticalAlignment="Center" Margin="0,0,10,0" />
                         <ComboBox Width="150" SelectedValue="{Binding SelectedGroupingRule.EvalType}" SelectedValuePath="Tag">
-                            <ComboBoxItem Content="AND (全て一致)" Tag="{x:Static model_group:EvalType.AND}" />
-                            <ComboBoxItem Content="OR (いずれか一致)" Tag="{x:Static model_group:EvalType.OR}" />
+                            <ComboBoxItem Content="AND" Tag="{x:Static model_group:EvalType.AND}" />
+                            <ComboBoxItem Content="OR" Tag="{x:Static model_group:EvalType.OR}" />
                         </ComboBox>
                     </StackPanel>
 
@@ -2178,23 +2240,23 @@ namespace WindowSorter {
                                                 <ColumnDefinition Width="Auto" />
                                                 <ColumnDefinition Width="Auto" />
                                                 <ColumnDefinition Width="Auto" />
-                                                <ColumnDefinition Width="Auto" />
                                                 <ColumnDefinition Width="*" />
                                                 <ColumnDefinition Width="Auto" />
                                             </Grid.ColumnDefinitions>
-                                            <TextBlock Text="対象:" VerticalAlignment="Center" Margin="0,0,5,0" />
-                                            <ComboBox Grid.Column="1" Width="100" Margin="0,0,10,0" 
+                                            <ComboBox Grid.Column="0" Width="100" Margin="0,0,10,0" 
                                                       ItemsSource="{Binding Source={StaticResource TargetEnumValues}}"
                                                       SelectedItem="{Binding Target}" />
 
-                                            <TextBlock Grid.Column="2" Text="方法:" VerticalAlignment="Center" Margin="0,0,5,0" />
-                                            <ComboBox Grid.Column="3" Width="100" Margin="0,0,10,0" 
+                                            <ComboBox Grid.Column="1" Width="100" Margin="0,0,10,0" 
                                                       ItemsSource="{Binding Source={StaticResource OperatorEnumValues}}"
                                                       SelectedItem="{Binding Operator}" />
 
-                                            <TextBox Grid.Column="4" Text="{Binding Value, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,10,0" Padding="2" />
+                                            <CheckBox Grid.Column="2" Content="否定" VerticalAlignment="Center" Margin="0,0,10,0" 
+                                                IsChecked="{Binding IsNegative}" />
 
-                                            <Button Grid.Column="5" Content="削除" Width="40" 
+                                            <TextBox Grid.Column="3" Text="{Binding Value, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,10,0" Padding="2" />
+
+                                            <Button Grid.Column="4" Content="削除" Width="40" 
                                                     Command="{Binding DataContext.RemoveGroupingRuleConditionCommand, RelativeSource={RelativeSource AncestorType=Window}}" 
                                                     CommandParameter="{Binding}" />
                                         </Grid>
@@ -2207,6 +2269,54 @@ namespace WindowSorter {
                         </Grid>
                     </GroupBox>
                 </Grid>
+            </Grid>
+
+            <!-- ******************************************************************** -->
+            <!-- 除外設定ビュー -->
+            <!-- ******************************************************************** -->
+            <Grid x:Name="IgnoreSettingsView" Visibility="{Binding IsSelected, ElementName=MenuIgnore, Converter={StaticResource BooleanToVisibilityConverter}, FallbackValue=Collapsed}">
+                <GroupBox Header="除外条件の設定 (ORで評価します)">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <ListBox Margin="5" ItemsSource="{Binding IgnoreList}" HorizontalContentAlignment="Stretch">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Margin="0,2">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <ComboBox Grid.Column="0" Width="100" Margin="0,0,10,0" 
+                                                  ItemsSource="{Binding Source={StaticResource TargetEnumValues}}"
+                                                  SelectedItem="{Binding Target}" />
+
+                                        <ComboBox Grid.Column="1" Width="100" Margin="0,0,10,0" 
+                                                  ItemsSource="{Binding Source={StaticResource OperatorEnumValues}}"
+                                                  SelectedItem="{Binding Operator}" />
+
+                                        <CheckBox Grid.Column="2" Content="否定" VerticalAlignment="Center" Margin="0,0,10,0" 
+                                                  IsChecked="{Binding IsNegative}" />
+
+                                        <TextBox Grid.Column="3" Text="{Binding Value, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,10,0" Padding="2" />
+
+                                        <Button Grid.Column="4" Content="削除" Width="40" 
+                                                Command="{Binding DataContext.RemoveIgnoreConditionCommand, RelativeSource={RelativeSource AncestorType=Window}}" 
+                                                CommandParameter="{Binding}" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                        <StackPanel Grid.Column="1" Margin="5">
+                            <Button Content="追加" Command="{Binding AddIgnoreConditionCommand}" Width="60" Margin="0,0,0,5" />
+                        </StackPanel>
+                    </Grid>
+                </GroupBox>
             </Grid>
         </Grid>
 
@@ -2411,10 +2521,10 @@ namespace WindowSorter.ViewModel {
             var currentStates = _windowGroupList?.ToDictionary(g => g.Name, g => g.IsExpanded);
 
             List<WindowGroup> groups = WindowGroupingEngine.GetWindowGroupList(
-                SettingsService.Current.GroupingRuleList,
-                SettingsService.Current.GroupList
+                SettingsService.Current.GroupingRuleList, 
+                SettingsService.Current.GroupList,
+                SettingsService.Current.IgnoreList
             );
-
             var newGroups = groups.Select(x => {
                 var vm = new WindowGroupVM(x, () => {
                     if (SettingsService.Current.ClearSearchOnWindowSelect) {
@@ -2512,6 +2622,9 @@ namespace WindowSorter.ViewModel.Settings {
         /// <summary>振り分けルール</summary>
         public ObservableCollection<GroupingRuleVM> GroupingRuleList { get; }
 
+        /// <summary>除外リスト</summary>
+        public ObservableCollection<Condition> IgnoreList { get; }
+
         // -----------------------------------------------------------------
         // ホットキー設定
         // -----------------------------------------------------------------
@@ -2562,6 +2675,34 @@ namespace WindowSorter.ViewModel.Settings {
             set {
                 if (SetProperty(ref _clearSearchOnWindowSelect, value)) {
                     RaisePropertyChanged(nameof(ClearSearchOnWindowSelect));
+                }
+            }
+        }
+
+        // -----------------------------------------------------------------
+        // 検索設定
+        // -----------------------------------------------------------------
+        public bool IsSearchPartialMatch {
+            get => SearchMethod == SearchMethod.PartialMatch;
+            set {
+                if (value) SearchMethod = SearchMethod.PartialMatch;
+            }
+        }
+
+        public bool IsSearchFuzzy {
+            get => SearchMethod == SearchMethod.FuzzySearch;
+            set {
+                if (value) SearchMethod = SearchMethod.FuzzySearch;
+            }
+        }
+
+        private SearchMethod _searchMethod;
+        public SearchMethod SearchMethod {
+            get => _searchMethod;
+            set {
+                if (SetProperty(ref _searchMethod, value)) {
+                    RaisePropertyChanged(nameof(IsSearchPartialMatch));
+                    RaisePropertyChanged(nameof(IsSearchFuzzy));
                 }
             }
         }
@@ -2656,6 +2797,11 @@ namespace WindowSorter.ViewModel.Settings {
 
         public DelegateCommand AddGroupingRuleConditionCommand { get; }
         public DelegateCommand RemoveGroupingRuleConditionCommand { get; }
+
+        // 除外設定
+        public DelegateCommand AddIgnoreConditionCommand { get; }
+        public DelegateCommand RemoveIgnoreConditionCommand { get; }
+
         public DelegateCommand ClearHotKeyCommand { get; }
         public DelegateCommand SaveCommand { get; }
         public DelegateCommand CancelCommand { get; }
@@ -2674,6 +2820,7 @@ namespace WindowSorter.ViewModel.Settings {
             ClearSearchOnWindowSelect = _model.ClearSearchOnWindowSelect;
             ThumbnailWidth = _model.ThumbnailWidth;
             ThumbnailHeight = _model.ThumbnailHeight;
+            SearchMethod = _model.SearchMethod;
 
             // グループ一覧とルールのViewModel
             GroupList = new ObservableCollection<WindowGroupVM>(
@@ -2681,6 +2828,9 @@ namespace WindowSorter.ViewModel.Settings {
 
             GroupingRuleList = new ObservableCollection<GroupingRuleVM>(
                 _model.GroupingRuleList.Select(x => new GroupingRuleVM(x)));
+
+            // 除外設定のViewModel
+            IgnoreList = new ObservableCollection<Condition>(_model.IgnoreList);
 
             // デフォルト選択
             SelectedGroup = GroupList.FirstOrDefault();
@@ -2823,6 +2973,17 @@ namespace WindowSorter.ViewModel.Settings {
             });
 
             // -----------------------------------------------------------------
+            // 除外設定
+            // -----------------------------------------------------------------
+            AddIgnoreConditionCommand = new DelegateCommand(_ => {
+                IgnoreList.Add(new Condition());
+            });
+
+            RemoveIgnoreConditionCommand = new DelegateCommand(obj => {
+                if (obj is Condition cond) IgnoreList.Remove(cond);
+            });
+
+            // -----------------------------------------------------------------
             // 保存・キャンセル
             // -----------------------------------------------------------------
             // 保存
@@ -2834,11 +2995,13 @@ namespace WindowSorter.ViewModel.Settings {
                 _model.ClearSearchOnWindowSelect = ClearSearchOnWindowSelect;
                 _model.ThumbnailWidth = ThumbnailWidth;
                 _model.ThumbnailHeight = ThumbnailHeight;
+                _model.SearchMethod = SearchMethod;
 
-                // グループとルール
+                // グループとルールと除外リスト
                 _model.GroupList = GroupList.Select(x => x.Pack()).ToList();
                 _model.GroupingRuleList = GroupingRuleList.Select(x => x.Pack()).ToList();
-                
+                _model.IgnoreList = IgnoreList.ToList();
+
                 SettingsService.Save(_model);
                 WindowService.Instance.Close(this, true);
             });
@@ -2949,6 +3112,7 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Data;
 using WindowSorter.Core;
+using WindowSorter.Model;
 using WindowSorter.Model.Grouping;
 
 namespace WindowSorter.ViewModel {
@@ -2971,7 +3135,7 @@ namespace WindowSorter.ViewModel {
             set {
                 if (_windowList != value) {
                     SetProperty(ref this._windowList, value);
-                    
+
                     _windowListView = CollectionViewSource.GetDefaultView(_windowList);
                     _windowListView.Filter = FilterWindow;
                     RaisePropertyChanged(nameof(WindowListView));
@@ -2998,7 +3162,7 @@ namespace WindowSorter.ViewModel {
             set {
                 if (SetProperty(ref _searchText, value)) {
                     WindowListView?.Refresh();
-                    
+
                     RaisePropertyChanged(nameof(HasVisibleWindows));
                 }
             }
@@ -3024,22 +3188,35 @@ namespace WindowSorter.ViewModel {
         }
 
         // 検索本体
-        // とりあえずFuzzy Search
         private static bool IsMatch(string source, string query) {
-            if (string.IsNullOrEmpty(query)) return true;
-            if (string.IsNullOrEmpty(source)) return false;
-
-            int sourceIdx = 0;
-            int queryIdx = 0;
-
-            while (sourceIdx < source.Length && queryIdx < query.Length) {
-                if (char.ToLowerInvariant(source[sourceIdx]) == char.ToLowerInvariant(query[queryIdx])) {
-                    queryIdx++;
-                }
-                sourceIdx++;
+            if (string.IsNullOrEmpty(query)) {
+                return true;
             }
 
-            return queryIdx == query.Length;
+            if (string.IsNullOrEmpty(source)) {
+                return false;
+            }
+
+            switch (SettingsService.Current.SearchMethod) {
+                case SearchMethod.PartialMatch:
+                    return source.Contains(query, StringComparison.OrdinalIgnoreCase);
+
+                case SearchMethod.FuzzySearch:
+                    int sourceIdx = 0;
+                    int queryIdx = 0;
+
+                    while (sourceIdx < source.Length && queryIdx < query.Length) {
+                        if (char.ToLowerInvariant(source[sourceIdx]) == char.ToLowerInvariant(query[queryIdx])) {
+                            queryIdx++;
+                        }
+                        sourceIdx++;
+                    }
+
+                    return queryIdx == query.Length;
+
+                default:
+                    return source.Contains(query, StringComparison.OrdinalIgnoreCase);
+            }
         }
 
         public WindowGroupVM(WindowGroup windowGroup, Action onWindowExecuted = null) {
