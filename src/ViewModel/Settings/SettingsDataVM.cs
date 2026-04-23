@@ -5,6 +5,7 @@ using System.Linq;
 using System.Windows.Input;
 using WindowSorter.Core;
 using WindowSorter.Model;
+using WindowSorter.Model.Settings;
 using WindowSorter.Model.Grouping;
 
 namespace WindowSorter.ViewModel.Settings {
@@ -36,6 +37,31 @@ namespace WindowSorter.ViewModel.Settings {
                 if (SetProperty(ref _selectedModifier, value)) {
                     RaisePropertyChanged(nameof(HotKeyText));
                 }
+            }
+        }
+        
+        private Key _selectedKey;
+        public Key SelectedKey {
+            get => _selectedKey;
+            set {
+                if (SetProperty(ref _selectedKey, value)) {
+                    RaisePropertyChanged(nameof(HotKeyText));
+                }
+            }
+        }
+
+        public string HotKeyText {
+            get {
+                if (SelectedKey == Key.None) return "未登録";
+
+                var sb = new System.Text.StringBuilder();
+                if (SelectedModifier.HasFlag(ModifierKeys.Control)) sb.Append("Ctrl + ");
+                if (SelectedModifier.HasFlag(ModifierKeys.Alt)) sb.Append("Alt + ");
+                if (SelectedModifier.HasFlag(ModifierKeys.Shift)) sb.Append("Shift + ");
+                if (SelectedModifier.HasFlag(ModifierKeys.Windows)) sb.Append("Win + ");
+
+                sb.Append(SelectedKey.ToString());
+                return sb.ToString();
             }
         }
 
@@ -108,44 +134,24 @@ namespace WindowSorter.ViewModel.Settings {
             }
         }
 
-        private Key _selectedKey;
-        public Key SelectedKey {
-            get => _selectedKey;
-            set {
-                if (SetProperty(ref _selectedKey, value)) {
-                    RaisePropertyChanged(nameof(HotKeyText));
-                }
-            }
+        // -----------------------------------------------------------------
+        // 色設定
+        // -----------------------------------------------------------------
+        private string _selectedColor;
+        public string SelectedColor {
+            get => _selectedColor;
+            set => SetProperty(ref _selectedColor, value);
         }
 
-        public string HotKeyText {
-            get {
-                if (SelectedKey == Key.None) return "未登録";
-
-                var sb = new System.Text.StringBuilder();
-                if (SelectedModifier.HasFlag(ModifierKeys.Control)) sb.Append("Ctrl + ");
-                if (SelectedModifier.HasFlag(ModifierKeys.Alt)) sb.Append("Alt + ");
-                if (SelectedModifier.HasFlag(ModifierKeys.Shift)) sb.Append("Shift + ");
-                if (SelectedModifier.HasFlag(ModifierKeys.Windows)) sb.Append("Win + ");
-
-                sb.Append(SelectedKey.ToString());
-                return sb.ToString();
-            }
-        }
-
-        /// <summary>
-        /// ホットキーをセットする（Viewから呼ばれる）
-        /// </summary>
-        public void SetHotKey(ModifierKeys modifier, Key key) {
-            _selectedModifier = modifier;
-            _selectedKey = key;
-            RaisePropertyChanged(nameof(HotKeyText));
+        private string _backgroundColor;
+        public string BackgroundColor {
+            get => _backgroundColor;
+            set => SetProperty(ref _backgroundColor, value);
         }
 
         // -----------------------------------------------------------------
         // 選択状態の管理
         // -----------------------------------------------------------------
-
         private WindowGroupVM _selectedGroup;
         public WindowGroupVM SelectedGroup {
             get => _selectedGroup;
@@ -214,6 +220,7 @@ namespace WindowSorter.ViewModel.Settings {
             // Modelを取得（クローンを編集）
             _model = SettingsService.Current.GetClone();
 
+            #region 設定を追加したら、ここでModel -> VMに移し替える
             // 全般の設定
             SelectedModifier = _model.HotKeyModifier;
             SelectedKey = _model.HotKey;
@@ -222,6 +229,8 @@ namespace WindowSorter.ViewModel.Settings {
             ThumbnailWidth = _model.ThumbnailWidth;
             ThumbnailHeight = _model.ThumbnailHeight;
             SearchMethod = _model.SearchMethod;
+            SelectedColor = _model.SelectedColor;
+            BackgroundColor = _model.BackgroundColor;
 
             // グループ一覧とルールのViewModel
             GroupList = new ObservableCollection<WindowGroupVM>(
@@ -233,10 +242,13 @@ namespace WindowSorter.ViewModel.Settings {
             // 除外設定のViewModel
             IgnoreList = new ObservableCollection<Condition>(_model.IgnoreList);
 
+            #endregion
+
             // デフォルト選択
             SelectedGroup = GroupList.FirstOrDefault();
             SelectedGroupingRule = GroupingRuleList.FirstOrDefault();
 
+            #region Command
             // -----------------------------------------------------------------
             // ホットキー設定
             // -----------------------------------------------------------------
@@ -384,11 +396,15 @@ namespace WindowSorter.ViewModel.Settings {
                 if (obj is Condition cond) IgnoreList.Remove(cond);
             });
 
+            #endregion
+
             // -----------------------------------------------------------------
             // 保存・キャンセル
             // -----------------------------------------------------------------
             // 保存
             SaveCommand = new DelegateCommand(_ => {
+                #region 設定を追加したら、ここでVM -> Modelに移し替える
+
                 // 全般
                 _model.HotKeyModifier = SelectedModifier;
                 _model.HotKey = SelectedKey;
@@ -397,20 +413,38 @@ namespace WindowSorter.ViewModel.Settings {
                 _model.ThumbnailWidth = ThumbnailWidth;
                 _model.ThumbnailHeight = ThumbnailHeight;
                 _model.SearchMethod = SearchMethod;
+                _model.SelectedColor = SelectedColor;
+                _model.BackgroundColor = BackgroundColor;
 
                 // グループとルールと除外リスト
                 _model.GroupList = GroupList.Select(x => x.Pack()).ToList();
                 _model.GroupingRuleList = GroupingRuleList.Select(x => x.Pack()).ToList();
                 _model.IgnoreList = IgnoreList.ToList();
+                
+                #endregion
 
+                // 設定を適用する
                 SettingsService.Save(_model);
+                ColorManager.Apply(SettingsService.Current.SelectedColor, SettingsService.Current.BackgroundColor);
+
+                // 設定画面を閉じる
                 WindowService.Instance.Close(this, true);
+
             });
 
             // キャンセル
             CancelCommand = new DelegateCommand(_ => {
                 WindowService.Instance.Close(this, false);
             });
+        }
+
+        /// <summary>
+        /// ホットキーをセットする（Viewから呼ばれる）
+        /// </summary>
+        public void SetHotKey(ModifierKeys modifier, Key key) {
+            _selectedModifier = modifier;
+            _selectedKey = key;
+            RaisePropertyChanged(nameof(HotKeyText));
         }
     }
 }

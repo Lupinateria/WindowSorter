@@ -3,8 +3,8 @@ using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
 using WindowSorter.Core;
-using WindowSorter.Model;
 using WindowSorter.Model.HotKey;
+using WindowSorter.Model.Settings;
 using WindowSorter.View;
 using WindowSorter.View.Settings;
 using Application = System.Windows.Application;
@@ -45,6 +45,11 @@ namespace WindowSorter {
             // 設定ファイル 読み込み
             // --------------------------------------------------------------------------
             SettingsService.Load();
+
+            // --------------------------------------------------------------------------
+            // 色適用
+            // --------------------------------------------------------------------------
+            ColorManager.Apply(SettingsService.Current.SelectedColor, SettingsService.Current.BackgroundColor);
 
             // --------------------------------------------------------------------------
             // ホットキー登録

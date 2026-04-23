@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using System.Windows.Data;
 using WindowSorter.Core;
 using WindowSorter.Model;
+using WindowSorter.Model.Settings;
 using WindowSorter.Model.Grouping;
 
 namespace WindowSorter.ViewModel {

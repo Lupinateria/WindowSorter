@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using System.Windows.Input;
 using WindowSorter.Model.Grouping;
 
-namespace WindowSorter.Model {
+namespace WindowSorter.Model.Settings {
     /// <summary>
     /// 検索方法
     /// </summary>
@@ -27,6 +27,9 @@ namespace WindowSorter.Model {
         public double ThumbnailWidth { get; set; } = 284;
         public double ThumbnailHeight { get; set; } = 160;
         public SearchMethod SearchMethod { get; set; } = SearchMethod.PartialMatch;
+        public string SelectedColor { get; set; } = "#00FF00";
+        public string BackgroundColor { get; set; } = "#333333";
+
         /// <summary>
         /// 現在の設定のクローンインスタンス取得
         /// </summary>

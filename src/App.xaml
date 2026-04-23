@@ -3,6 +3,14 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:local="clr-namespace:WindowSorter">
     <Application.Resources>
-
+        <SolidColorBrush x:Key="SelectedBrush" Color="#007AFF" />
+        <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#666666" />
+        
+        <SolidColorBrush x:Key="PrimaryTextBrush" Color="#EFEFEF" />
+        <SolidColorBrush x:Key="SecondaryTextBrush" Color="#CCCCCC" />
+        
+        <SolidColorBrush x:Key="SearchBoxBrush" Color="#888888" />
+        <SolidColorBrush x:Key="SeparatorBrush" Color="#EEEEEE" />
+        <SolidColorBrush x:Key="TitleBarBackgroundBrush" Color="#3A3A3A" />
     </Application.Resources>
 </Application>

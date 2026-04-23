@@ -45,5 +45,39 @@ namespace WindowSorter.View.Settings {
                 vm.SetHotKey(modifier, key);
             }
         }
+
+        private void SelectBackgroundColor_Click(object sender, RoutedEventArgs e) {
+            if (DataContext is SettingsDataVM vm) {
+                var newColor = ShowColorPicker(vm.BackgroundColor);
+                if (newColor != null) {
+                    vm.BackgroundColor = newColor;
+                }
+            }
+        }
+
+        private void SelectSelectedColor_Click(object sender, RoutedEventArgs e) {
+            if (DataContext is SettingsDataVM vm) {
+                var newColor = ShowColorPicker(vm.SelectedColor);
+                if (newColor != null) {
+                    vm.SelectedColor = newColor;
+                }
+            }
+        }
+
+        private string? ShowColorPicker(string initialColorHex) {
+            using var dialog = new System.Windows.Forms.ColorDialog();
+            
+            // 初期値をセット
+            try {
+                var mediaColor = (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(initialColorHex);
+                dialog.Color = System.Drawing.Color.FromArgb(mediaColor.A, mediaColor.R, mediaColor.G, mediaColor.B);
+            } catch { }
+
+            if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK) {
+                var c = dialog.Color;
+                return $"#{c.R:X2}{c.G:X2}{c.B:X2}";
+            }
+            return null;
+        }
     }
 }

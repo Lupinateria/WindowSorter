@@ -4,7 +4,15 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:local="clr-namespace:WindowSorter">
     <Application.Resources>
-
+        <SolidColorBrush x:Key="SelectedBrush" Color="#007AFF" />
+        <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#666666" />
+        
+        <SolidColorBrush x:Key="PrimaryTextBrush" Color="#EFEFEF" />
+        <SolidColorBrush x:Key="SecondaryTextBrush" Color="#CCCCCC" />
+        
+        <SolidColorBrush x:Key="SearchBoxBrush" Color="#888888" />
+        <SolidColorBrush x:Key="SeparatorBrush" Color="#EEEEEE" />
+        <SolidColorBrush x:Key="TitleBarBackgroundBrush" Color="#3A3A3A" />
     </Application.Resources>
 </Application>
 
@@ -15,8 +23,8 @@ using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
 using WindowSorter.Core;
-using WindowSorter.Model;
 using WindowSorter.Model.HotKey;
+using WindowSorter.Model.Settings;
 using WindowSorter.View;
 using WindowSorter.View.Settings;
 using Application = System.Windows.Application;
@@ -57,6 +65,11 @@ namespace WindowSorter {
             // 設定ファイル 読み込み
             // --------------------------------------------------------------------------
             SettingsService.Load();
+
+            // --------------------------------------------------------------------------
+            // 色適用
+            // --------------------------------------------------------------------------
+            ColorManager.Apply(SettingsService.Current.SelectedColor, SettingsService.Current.BackgroundColor);
 
             // --------------------------------------------------------------------------
             // ホットキー登録
@@ -145,6 +158,120 @@ using System.Windows;
 )]
 
 ---END-FILE---:src/AssemblyInfo.cs
+---BEGIN-FILE---:src/Core/ColorManager.cs
+using System;
+using System.Drawing;
+using System.Windows;
+using System.Windows.Forms;
+using System.Windows.Input;
+using System.Windows.Media;
+using Application = System.Windows.Application;
+using Color = System.Windows.Media.Color;
+using ColorConverter = System.Windows.Media.ColorConverter;
+
+namespace WindowSorter.Core {
+    public static class ColorManager {
+
+        // 色を適用する
+        public static void Apply(string selectedColorHex, string backgroundColorHex) {
+
+            // 枠の色と背景色はそのまま
+            Color selectedColor;
+            Color backgroundColor;
+            try {
+                selectedColor = (Color)ColorConverter.ConvertFromString(selectedColorHex);
+                backgroundColor = (Color)ColorConverter.ConvertFromString(backgroundColorHex);
+            } catch {
+                // TODO: デフォルト値をSettingsDataからとれるようにする
+                selectedColor = Color.FromRgb(128, 128, 255);
+                backgroundColor = Color.FromRgb(32, 32, 32);
+            }
+
+            // 背景色から、他の色を自動設定
+            bool isDark = GetLuma(backgroundColor) < 128;
+
+            // *** 文字色 ***
+            Color primaryText = isDark ? primaryText = Color.FromRgb(240, 240, 240) : Color.FromRgb(12, 12, 12);
+            Color secondaryText = isDark ? ShiftLuminance(primaryText, -0.33) : ShiftLuminance(primaryText, 0.33);
+
+            // *** 検索背景色 ***
+            Color searchBg = isDark ? ShiftLuminance(backgroundColor, 0.15) : ShiftLuminance(backgroundColor, 0.15);
+
+            // *** セパレータ ***
+            var separator = secondaryText;
+
+            // *** タイトル背景色 ***
+            Color titleBg = isDark ? ShiftLuminance(backgroundColor, -0.15) : ShiftLuminance(backgroundColor, 0.15);
+
+            Application.Current.Resources["SelectedBrush"] = new SolidColorBrush(selectedColor);
+            Application.Current.Resources["WindowBackgroundBrush"] = new SolidColorBrush(backgroundColor);
+            Application.Current.Resources["PrimaryTextBrush"] = new SolidColorBrush(primaryText);
+            Application.Current.Resources["SecondaryTextBrush"] = new SolidColorBrush(secondaryText);
+            Application.Current.Resources["SearchBoxBrush"] = new SolidColorBrush(searchBg);
+            Application.Current.Resources["SeparatorBrush"] = new SolidColorBrush(separator);
+            Application.Current.Resources["TitleBarBackgroundBrush"] = new SolidColorBrush(titleBg);
+        }
+
+        private static int GetLuma(Color c) {
+            return (int)Math.Ceiling((double)(c.R * 299 + c.G * 587 + c.B * 114) / 1000.0);
+        }
+
+        // delta ... -1.0 to 1.0
+        private static Color ShiftLuminance(Color color, double delta) {
+            // RGB -> [0, 1]
+            float r = color.R / 255f;
+            float g = color.G / 255f;
+            float b = color.B / 255f;
+
+            float max = Math.Max(r, Math.Max(g, b));
+            float min = Math.Min(r, Math.Min(g, b));
+            float h, s, l;
+
+            // *** RGB -> HSL ***
+            l = (max + min) / 2f;
+
+            if (max == min) {
+                h = s = 0;
+            } else {
+                float d = max - min;
+                s = l > 0.5f ? d / (2f - max - min) : d / (max + min);
+
+                if (max == r) h = (g - b) / d + (g < b ? 6 : 0);
+                else if (max == g) h = (b - r) / d + 2;
+                else h = (r - g) / d + 4;
+
+                h /= 6;
+            }
+
+            // *** 明度の調整 ***
+            l = Math.Clamp(l + (float)delta, 0, 1);
+
+            // *** HSL -> RGB ***
+            if (s == 0) {
+                r = g = b = l;
+            } else {
+                float q = l < 0.5f ? l * (1f + s) : l + s - l * s;
+                float p = 2f * l - q;
+                r = HueToRgb(p, q, h + 1f / 3f);
+                g = HueToRgb(p, q, h);
+                b = HueToRgb(p, q, h - 1f / 3f);
+            }
+
+            return Color.FromRgb((byte)(r * 255), (byte)(g * 255), (byte)(b * 255));
+        }
+
+        private static float HueToRgb(float p, float q, float t) {
+            if (t < 0) t += 1;
+            if (t > 1) t -= 1;
+            if (t < 1f / 6f) return p + (q - p) * 6f * t;
+            if (t < 1f / 2f) return q;
+            if (t < 2f / 3f) return p + (q - p) * (2f / 3f - t) * 6f;
+            return p;
+        }
+    }
+}
+
+---END-FILE---:src/Core/ColorManager.cs
 ---BEGIN-FILE---:src/Core/DelegateCommand.cs
 using System;
 using System.Collections.Generic;
@@ -1015,7 +1142,7 @@ using System.Collections.Generic;
 using System.Windows.Input;
 using WindowSorter.Model.Grouping;
 
-namespace WindowSorter.Model {
+namespace WindowSorter.Model.Settings {
     /// <summary>
     /// 検索方法
     /// </summary>
@@ -1040,6 +1167,9 @@ namespace WindowSorter.Model {
         public double ThumbnailWidth { get; set; } = 284;
         public double ThumbnailHeight { get; set; } = 160;
         public SearchMethod SearchMethod { get; set; } = SearchMethod.PartialMatch;
+        public string SelectedColor { get; set; } = "#00FF00";
+        public string BackgroundColor { get; set; } = "#333333";
+
         /// <summary>
         /// 現在の設定のクローンインスタンス取得
         /// </summary>
@@ -1059,7 +1189,7 @@ using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace WindowSorter.Model {
+namespace WindowSorter.Model.Settings {
     /// <summary>
     /// 設定ファイルの読み書きを管理
     /// </summary>
@@ -1189,7 +1319,6 @@ using System.Windows.Media;
 using System.Windows.Interop;
 using WindowSorter.Core;
 using Brushes = System.Windows.Media.Brushes;
-using System.Windows.Controls;
 
 namespace WindowSorter.View;
 
@@ -1388,16 +1517,16 @@ public class DwmThumbnailView : FrameworkElement {
 }
 ---END-FILE---:src/View/DwmThumbnailView.cs
 ---BEGIN-FILE---:src/View/MainWindow.xaml
-<Window x:Class="WindowSorter.MainWindow"
+<Window x:Class="WindowSorter.View.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        xmlns:local="clr-namespace:WindowSorter"
+        xmlns:local="clr-namespace:WindowSorter.View"
         xmlns:vm="clr-namespace:WindowSorter.ViewModel"
         xmlns:view="clr-namespace:WindowSorter.View"
         mc:Ignorable="d"
-        Background="#666"
+        Background="{DynamicResource WindowBackgroundBrush}"
         ShowInTaskbar="False"
         AllowsTransparency="False"
         WindowStyle="None"
@@ -1418,7 +1547,7 @@ public class DwmThumbnailView : FrameworkElement {
                         <Grid Background="{TemplateBinding Background}">
                             <Track Name="PART_Track" IsDirectionReversed="True">
                                 <Track.Thumb>
-                                    <Thumb Background="#44FFFFFF">
+                                    <Thumb Background="{DynamicResource PrimaryTextBrush}" Opacity="0.3">
                                         <Thumb.Template>
                                             <ControlTemplate TargetType="{x:Type Thumb}">
                                                 <Border Background="{TemplateBinding Background}" CornerRadius="4" Margin="1,0" />
@@ -1438,12 +1567,14 @@ public class DwmThumbnailView : FrameworkElement {
         <vm:MainWindowVM/>
     </Window.DataContext>
 
-    <Grid Background="#666">
+    <Grid Background="{DynamicResource WindowBackgroundBrush}">
         <Grid.ContextMenu>
             <ContextMenu>
                 <MenuItem Header="設定(_S)" Click="MenuSettings_Click" />
+                <!--
                 <Separator />
                 <MenuItem Header="Window Sorter について(_A)" Click="MenuAbout_Click" />
+                -->
             </ContextMenu>
         </Grid.ContextMenu>
         <Grid.RowDefinitions>
@@ -1460,11 +1591,11 @@ public class DwmThumbnailView : FrameworkElement {
             </Grid.ColumnDefinitions>
 
             <!-- 検索ボックス -->
-            <Border Grid.Column="0" Background="#888" CornerRadius="4" Width="350" Padding="10,5">
+            <Border Grid.Column="0" Background="{DynamicResource SearchBoxBrush}" CornerRadius="4" Width="350" Padding="10,5">
                 <TextBox x:Name="SearchTextBox" 
                          Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
                          Background="Transparent" 
-                         Foreground="#EFEFEF" 
+                         Foreground="{DynamicResource PrimaryTextBrush}" 
                          BorderThickness="0" 
                          FontSize="16"
                          VerticalContentAlignment="Center" />
@@ -1472,15 +1603,15 @@ public class DwmThumbnailView : FrameworkElement {
 
             <!-- 選択中のウィンドウタイトル表示ボックス -->
             <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="20,0,0,0">
-                <!-- <TextBlock Text="選択中: " Foreground="#CCC" FontSize="12" VerticalAlignment="Center" Margin="0,0,10,0" /> -->
+                <!-- <TextBlock Text="選択中: " Foreground="{DynamicResource SecondaryTextBrush}" FontSize="12" VerticalAlignment="Center" Margin="0,0,10,0" /> -->
                 <TextBlock Text="{Binding SelectedWindow.WindowTitle}" 
-                               Foreground="#EFEFEF" 
+                               Foreground="{DynamicResource PrimaryTextBrush}" 
                                FontSize="16" 
                                VerticalAlignment="Center" 
                                TextTrimming="CharacterEllipsis"/>
                 <TextBlock Text="{Binding SelectedWindow.ProcessName, StringFormat='- {0}'}" 
                            Margin="10,0,0,0"
-                           Foreground="#CCC" 
+                           Foreground="{DynamicResource SecondaryTextBrush}" 
                            FontSize="16" 
                            VerticalAlignment="Center" 
                            TextTrimming="CharacterEllipsis"/>
@@ -1488,7 +1619,7 @@ public class DwmThumbnailView : FrameworkElement {
         </Grid>
 
         <!-- 区切り線 -->
-        <Rectangle Grid.Row="1" Fill="#EEE" Height="1" HorizontalAlignment="Stretch" Margin="20,0" />
+        <Rectangle Grid.Row="1" Fill="{DynamicResource SeparatorBrush}" Height="1" HorizontalAlignment="Stretch" Margin="20,0" />
 
         <!-- ウィンドウ表示領域 -->
         <!-- 全体はスクロールビュー -->
@@ -1504,7 +1635,7 @@ public class DwmThumbnailView : FrameworkElement {
                         <Expander IsExpanded="{Binding IsExpanded}" Margin="0,0,0,20">
                             <Expander.Header>
                                 <!-- グループタイトル -->
-                                <TextBlock Text="{Binding Name}" Foreground="#EFEFEF" FontWeight="Bold" FontSize="18" Margin="0,0,0,5" />
+                                <TextBlock Text="{Binding Name}" Foreground="{DynamicResource PrimaryTextBrush}" FontWeight="Bold" FontSize="18" Margin="0,0,0,5" />
                             </Expander.Header>
 
                             <!-- ItemsControl ... ウィンドウ一覧 -->
@@ -1526,7 +1657,7 @@ public class DwmThumbnailView : FrameworkElement {
                                                     <Setter Property="BorderThickness" Value="2"/>
                                                     <Style.Triggers>
                                                         <DataTrigger Binding="{Binding IsSelected}" Value="True">
-                                                            <Setter Property="BorderBrush" Value="#007AFF"/>
+                                                            <Setter Property="BorderBrush" Value="{DynamicResource SelectedBrush}"/>
                                                         </DataTrigger>
                                                     </Style.Triggers>
                                                 </Style>
@@ -1537,10 +1668,10 @@ public class DwmThumbnailView : FrameworkElement {
                                             </Border.InputBindings>
 
                                             <StackPanel>
-                                                <Border Background="#3A3A3A" Padding="6,4" Height="40">
+                                                <Border Background="{DynamicResource TitleBarBackgroundBrush}" Padding="6,4" Height="40">
                                                     <StackPanel>
-                                                        <TextBlock Text="{Binding WindowTitle}" Foreground="#EFEFEF" TextWrapping="NoWrap" FontSize="13" TextTrimming="CharacterEllipsis"/>
-                                                        <TextBlock Text="{Binding ProcessName}" Foreground="#CCC" FontSize="10" TextTrimming="CharacterEllipsis" Margin="0,0,0,0" />
+                                                        <TextBlock Text="{Binding WindowTitle}" Foreground="{DynamicResource PrimaryTextBrush}" TextWrapping="NoWrap" FontSize="13" TextTrimming="CharacterEllipsis"/>
+                                                        <TextBlock Text="{Binding ProcessName}" Foreground="{DynamicResource SecondaryTextBrush}" FontSize="10" TextTrimming="CharacterEllipsis" Margin="0,0,0,0" />
                                                     </StackPanel>
                                                 </Border>
 
@@ -1579,14 +1710,13 @@ using System.Windows.Navigation;
 using System.Windows.Shapes;
 using System.Windows.Threading;
 using WindowSorter.Core;
-using WindowSorter.Model;
 using WindowSorter.Model.HotKey;
-using WindowSorter.View;
+using WindowSorter.Model.Settings;
 using WindowSorter.View.Settings;
 using WindowSorter.ViewModel;
 using Point = System.Windows.Point;
 
-namespace WindowSorter {
+namespace WindowSorter.View {
     /// <summary>
     /// Interaction logic for MainWindow.xaml
     /// </summary>
@@ -2013,7 +2143,22 @@ namespace WindowSorter {
                                   IsChecked="{Binding ClearSearchOnWindowSelect}" 
                                   Margin="0,15,0,0" />
 
+                    </StackPanel>
+                </GroupBox>
 
+                <GroupBox Header="色設定" Margin="0,0,0,10">
+                    <StackPanel Margin="10">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="背景色" VerticalAlignment="Center" Width="100" />
+                            <Border Width="60" Height="25" BorderBrush="#AAA" BorderThickness="1" Background="{Binding BackgroundColor}" />
+                            <Button Content="変更..." Click="SelectBackgroundColor_Click" Margin="10,0,0,0" Width="80" Height="25" />
+                        </StackPanel>
+
+                        <StackPanel Orientation="Horizontal" Margin="0,15,0,0">
+                            <TextBlock Text="選択枠の色" VerticalAlignment="Center" Width="100" />
+                            <Border Width="60" Height="25" BorderBrush="#AAA" BorderThickness="1" Background="{Binding SelectedColor}" />
+                            <Button Content="変更..." Click="SelectSelectedColor_Click" Margin="10,0,0,0" Width="80" Height="25" />
+                        </StackPanel>
                     </StackPanel>
                 </GroupBox>
                 
@@ -2379,6 +2524,40 @@ namespace WindowSorter.View.Settings {
                 vm.SetHotKey(modifier, key);
             }
         }
+
+        private void SelectBackgroundColor_Click(object sender, RoutedEventArgs e) {
+            if (DataContext is SettingsDataVM vm) {
+                var newColor = ShowColorPicker(vm.BackgroundColor);
+                if (newColor != null) {
+                    vm.BackgroundColor = newColor;
+                }
+            }
+        }
+
+        private void SelectSelectedColor_Click(object sender, RoutedEventArgs e) {
+            if (DataContext is SettingsDataVM vm) {
+                var newColor = ShowColorPicker(vm.SelectedColor);
+                if (newColor != null) {
+                    vm.SelectedColor = newColor;
+                }
+            }
+        }
+
+        private string? ShowColorPicker(string initialColorHex) {
+            using var dialog = new System.Windows.Forms.ColorDialog();
+            
+            // 初期値をセット
+            try {
+                var mediaColor = (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(initialColorHex);
+                dialog.Color = System.Drawing.Color.FromArgb(mediaColor.A, mediaColor.R, mediaColor.G, mediaColor.B);
+            } catch { }
+
+            if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK) {
+                var c = dialog.Color;
+                return $"#{c.R:X2}{c.G:X2}{c.B:X2}";
+            }
+            return null;
+        }
     }
 }
 
@@ -2394,6 +2573,7 @@ using System.Threading.Tasks;
 using System.Windows.Data;
 using WindowSorter.Core;
 using WindowSorter.Model;
+using WindowSorter.Model.Settings;
 using WindowSorter.Model.Grouping;
 
 namespace WindowSorter.ViewModel {
@@ -2604,6 +2784,7 @@ using System.Linq;
 using System.Windows.Input;
 using WindowSorter.Core;
 using WindowSorter.Model;
+using WindowSorter.Model.Settings;
 using WindowSorter.Model.Grouping;
 
 namespace WindowSorter.ViewModel.Settings {
@@ -2635,6 +2816,31 @@ namespace WindowSorter.ViewModel.Settings {
                 if (SetProperty(ref _selectedModifier, value)) {
                     RaisePropertyChanged(nameof(HotKeyText));
                 }
+            }
+        }
+        
+        private Key _selectedKey;
+        public Key SelectedKey {
+            get => _selectedKey;
+            set {
+                if (SetProperty(ref _selectedKey, value)) {
+                    RaisePropertyChanged(nameof(HotKeyText));
+                }
+            }
+        }
+
+        public string HotKeyText {
+            get {
+                if (SelectedKey == Key.None) return "未登録";
+
+                var sb = new System.Text.StringBuilder();
+                if (SelectedModifier.HasFlag(ModifierKeys.Control)) sb.Append("Ctrl + ");
+                if (SelectedModifier.HasFlag(ModifierKeys.Alt)) sb.Append("Alt + ");
+                if (SelectedModifier.HasFlag(ModifierKeys.Shift)) sb.Append("Shift + ");
+                if (SelectedModifier.HasFlag(ModifierKeys.Windows)) sb.Append("Win + ");
+
+                sb.Append(SelectedKey.ToString());
+                return sb.ToString();
             }
         }
 
@@ -2707,44 +2913,24 @@ namespace WindowSorter.ViewModel.Settings {
             }
         }
 
-        private Key _selectedKey;
-        public Key SelectedKey {
-            get => _selectedKey;
-            set {
-                if (SetProperty(ref _selectedKey, value)) {
-                    RaisePropertyChanged(nameof(HotKeyText));
-                }
-            }
+        // -----------------------------------------------------------------
+        // 色設定
+        // -----------------------------------------------------------------
+        private string _selectedColor;
+        public string SelectedColor {
+            get => _selectedColor;
+            set => SetProperty(ref _selectedColor, value);
         }
 
-        public string HotKeyText {
-            get {
-                if (SelectedKey == Key.None) return "未登録";
-
-                var sb = new System.Text.StringBuilder();
-                if (SelectedModifier.HasFlag(ModifierKeys.Control)) sb.Append("Ctrl + ");
-                if (SelectedModifier.HasFlag(ModifierKeys.Alt)) sb.Append("Alt + ");
-                if (SelectedModifier.HasFlag(ModifierKeys.Shift)) sb.Append("Shift + ");
-                if (SelectedModifier.HasFlag(ModifierKeys.Windows)) sb.Append("Win + ");
-
-                sb.Append(SelectedKey.ToString());
-                return sb.ToString();
-            }
-        }
-
-        /// <summary>
-        /// ホットキーをセットする（Viewから呼ばれる）
-        /// </summary>
-        public void SetHotKey(ModifierKeys modifier, Key key) {
-            _selectedModifier = modifier;
-            _selectedKey = key;
-            RaisePropertyChanged(nameof(HotKeyText));
+        private string _backgroundColor;
+        public string BackgroundColor {
+            get => _backgroundColor;
+            set => SetProperty(ref _backgroundColor, value);
         }
 
         // -----------------------------------------------------------------
         // 選択状態の管理
         // -----------------------------------------------------------------
-
         private WindowGroupVM _selectedGroup;
         public WindowGroupVM SelectedGroup {
             get => _selectedGroup;
@@ -2813,6 +2999,7 @@ namespace WindowSorter.ViewModel.Settings {
             // Modelを取得（クローンを編集）
             _model = SettingsService.Current.GetClone();
 
+            #region 設定を追加したら、ここでModel -> VMに移し替える
             // 全般の設定
             SelectedModifier = _model.HotKeyModifier;
             SelectedKey = _model.HotKey;
@@ -2821,6 +3008,8 @@ namespace WindowSorter.ViewModel.Settings {
             ThumbnailWidth = _model.ThumbnailWidth;
             ThumbnailHeight = _model.ThumbnailHeight;
             SearchMethod = _model.SearchMethod;
+            SelectedColor = _model.SelectedColor;
+            BackgroundColor = _model.BackgroundColor;
 
             // グループ一覧とルールのViewModel
             GroupList = new ObservableCollection<WindowGroupVM>(
@@ -2832,10 +3021,13 @@ namespace WindowSorter.ViewModel.Settings {
             // 除外設定のViewModel
             IgnoreList = new ObservableCollection<Condition>(_model.IgnoreList);
 
+            #endregion
+
             // デフォルト選択
             SelectedGroup = GroupList.FirstOrDefault();
             SelectedGroupingRule = GroupingRuleList.FirstOrDefault();
 
+            #region Command
             // -----------------------------------------------------------------
             // ホットキー設定
             // -----------------------------------------------------------------
@@ -2983,11 +3175,15 @@ namespace WindowSorter.ViewModel.Settings {
                 if (obj is Condition cond) IgnoreList.Remove(cond);
             });
 
+            #endregion
+
             // -----------------------------------------------------------------
             // 保存・キャンセル
             // -----------------------------------------------------------------
             // 保存
             SaveCommand = new DelegateCommand(_ => {
+                #region 設定を追加したら、ここでVM -> Modelに移し替える
+
                 // 全般
                 _model.HotKeyModifier = SelectedModifier;
                 _model.HotKey = SelectedKey;
@@ -2996,20 +3192,38 @@ namespace WindowSorter.ViewModel.Settings {
                 _model.ThumbnailWidth = ThumbnailWidth;
                 _model.ThumbnailHeight = ThumbnailHeight;
                 _model.SearchMethod = SearchMethod;
+                _model.SelectedColor = SelectedColor;
+                _model.BackgroundColor = BackgroundColor;
 
                 // グループとルールと除外リスト
                 _model.GroupList = GroupList.Select(x => x.Pack()).ToList();
                 _model.GroupingRuleList = GroupingRuleList.Select(x => x.Pack()).ToList();
                 _model.IgnoreList = IgnoreList.ToList();
+                
+                #endregion
 
+                // 設定を適用する
                 SettingsService.Save(_model);
+                ColorManager.Apply(SettingsService.Current.SelectedColor, SettingsService.Current.BackgroundColor);
+
+                // 設定画面を閉じる
                 WindowService.Instance.Close(this, true);
+
             });
 
             // キャンセル
             CancelCommand = new DelegateCommand(_ => {
                 WindowService.Instance.Close(this, false);
             });
+        }
+
+        /// <summary>
+        /// ホットキーをセットする（Viewから呼ばれる）
+        /// </summary>
+        public void SetHotKey(ModifierKeys modifier, Key key) {
+            _selectedModifier = modifier;
+            _selectedKey = key;
+            RaisePropertyChanged(nameof(HotKeyText));
         }
     }
 }
@@ -3113,6 +3327,7 @@ using System.Threading.Tasks;
 using System.Windows.Data;
 using WindowSorter.Core;
 using WindowSorter.Model;
+using WindowSorter.Model.Settings;
 using WindowSorter.Model.Grouping;
 
 namespace WindowSorter.ViewModel {

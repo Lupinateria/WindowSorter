@@ -5,7 +5,7 @@ using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace WindowSorter.Model {
+namespace WindowSorter.Model.Settings {
     /// <summary>
     /// 設定ファイルの読み書きを管理
     /// </summary>

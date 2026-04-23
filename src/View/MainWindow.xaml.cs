@@ -13,14 +13,13 @@ using System.Windows.Navigation;
 using System.Windows.Shapes;
 using System.Windows.Threading;
 using WindowSorter.Core;
-using WindowSorter.Model;
 using WindowSorter.Model.HotKey;
-using WindowSorter.View;
+using WindowSorter.Model.Settings;
 using WindowSorter.View.Settings;
 using WindowSorter.ViewModel;
 using Point = System.Windows.Point;
 
-namespace WindowSorter {
+namespace WindowSorter.View {
     /// <summary>
     /// Interaction logic for MainWindow.xaml
     /// </summary>

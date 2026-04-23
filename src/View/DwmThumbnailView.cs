@@ -5,7 +5,6 @@ using System.Windows.Media;
 using System.Windows.Interop;
 using WindowSorter.Core;
 using Brushes = System.Windows.Media.Brushes;
-using System.Windows.Controls;
 
 namespace WindowSorter.View;
 
